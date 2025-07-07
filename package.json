@@ -1,0 +1,30 @@
+{
+  "name": "video-search-app",
+  "version": "1.0.0",
+  "description": "Video search app with transcription and search",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "dependencies": {
+    "electron": "^25.0.0",
+    "better-sqlite3": "^8.0.0",
+    "python-shell": "^5.0.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.example.vide search",
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}
