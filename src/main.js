@@ -17,7 +17,7 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile('index.html');
+  mainWindow.loadFile('public/index.html');
 
   // Initialize database
   db = sqlite3('transcripts.db');
@@ -50,7 +50,7 @@ app.on('activate', () => {
 ipcMain.handle('transcribe-video', async (event, videoPath) => {
   // Call Python script for transcription
   return new Promise((resolve, reject) => {
-    PythonShell.run('transcribe.py', { args: [videoPath] }, (err, results) => {
+    PythonShell.run('scripts/transcribe.py', { args: [videoPath] }, (err, results) => {
       if (err) reject(err);
       else resolve(results[0]);
     });
@@ -61,6 +61,46 @@ ipcMain.handle('transcribe-video', async (event, videoPath) => {
 ipcMain.handle('search-transcripts', (event, query) => {
   const stmt = db.prepare('SELECT * FROM transcripts WHERE transcript LIKE ?');
   return stmt.all(`%${query}%`);
+});
+
+// IPC for folder selection and processing
+ipcMain.handle('select-folder', async () => {
+  const { dialog } = require('electron');
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory']
+  });
+  if (result.canceled) return [];
+  
+  const fs = require('fs');
+  const path = require('path');
+  const folderPath = result.filePaths[0];
+  const videoFiles = fs.readdirSync(folderPath).filter(file => 
+    ['.mp4', '.mkv', '.avi'].includes(path.extname(file).toLowerCase())
+  );
+  
+  const processed = [];
+  for (const file of videoFiles) {
+    const videoPath = path.join(folderPath, file);
+    try {
+      // Transcribe
+      const transcriptData = await new Promise((resolve, reject) => {
+        PythonShell.run('scripts/transcribe.py', { args: [videoPath] }, (err, results) => {
+          if (err) reject(err);
+          else resolve(JSON.parse(results[0]));
+        });
+      });
+      
+      // Insert into DB
+      for (const segment of transcriptData) {
+        const stmt = db.prepare('INSERT INTO transcripts (video_path, transcript, timestamp) VALUES (?, ?, ?)');
+        stmt.run(videoPath, segment.text, segment.start);
+      }
+      processed.push(videoPath);
+    } catch (error) {
+      console.error(`Error processing ${file}:`, error);
+    }
+  }
+  return processed;
 });
 
 // IPC for inserting transcript

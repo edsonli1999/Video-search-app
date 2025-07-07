@@ -16,10 +16,9 @@
   <div id="results"></div>
 
   <script>
-    function selectFolder() {
-      // In a real app, use dialog to select folder and process videos
-      alert('Folder selection - process videos and transcribe');
-      // Here you would call api.transcribeVideo for each video
+    async function selectFolder() {
+      const processed = await window.api.selectFolder();
+      alert(`Processed ${processed.length} videos`);
     }
 
     async function search() {
