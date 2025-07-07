@@ -15,6 +15,10 @@ const App = () => {
 
   // Load existing videos on app start
   useEffect(() => {
+    console.log('App started, electronAPI available:', !!window.electronAPI);
+    if (window.electronAPI) {
+      console.log('electronAPI methods:', Object.keys(window.electronAPI));
+    }
     loadVideos();
   }, []);
 
@@ -28,13 +32,28 @@ const App = () => {
   };
 
   const handleSelectFolder = async () => {
+    console.log('handleSelectFolder called');
+    console.log('electronAPI available:', !!window.electronAPI);
+    
+    if (!window.electronAPI) {
+      console.error('electronAPI not available!');
+      alert('electronAPI not available - preload script may not have loaded correctly');
+      return;
+    }
+    
     try {
+      console.log('Calling selectFolder...');
       const folderPath = await window.electronAPI.selectFolder();
+      console.log('Selected folder:', folderPath);
+      
       if (folderPath) {
         setSelectedFolder(folderPath);
         setIsScanning(true);
         
+        console.log('Scanning videos in:', folderPath);
         const scannedVideos = await window.electronAPI.scanVideos(folderPath);
+        console.log('Scanned videos:', scannedVideos);
+        
         setVideos(scannedVideos);
         setIsScanning(false);
       }

@@ -22,12 +22,10 @@ function createWindow(): void {
   });
 
   // Load the app
-  if (process.env.NODE_ENV === 'development') {
-    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
-    mainWindow.webContents.openDevTools();
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
-  }
+  mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+  
+  // Always open dev tools for debugging
+  mainWindow.webContents.openDevTools();
 
   // Show window when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
