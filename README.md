@@ -1,25 +1,61 @@
 # Video Search App - MVP
 
-A desktop application that helps users search their personal video files by spoken content through search indexing.
+A desktop application that helps users search their personal video files by spoken content through AI transcription indexing.
 
-## Features (MVP)
+## Current Architecture
 
-- ✅ **Folder Selection**: Select a folder containing video files
-- ✅ **Video Scanning**: Automatically detect video files (.mp4, .mkv, .avi, .mov, .webm, .m4v, .wmv, .flv)
-- ✅ **Database Storage**: Store video metadata in local SQLite database
-- ✅ **Mock Transcription**: Simulate transcription process with dummy data
-- ✅ **Full-Text Search**: Search through transcripts using SQLite FTS5
-- ✅ **Search Results**: Display search results with timestamps
-- ✅ **Video Library**: View all scanned videos with transcription status
-- ✅ **Responsive UI**: Clean, modern interface with status indicators
+This application uses a **3-tier architecture** with secure communication between layers:
+
+```
+┌─────────────────────┐    ┌──────────────────────┐    ┌─────────────────────┐
+│   React Frontend    │    │   Node.js Backend    │    │   SQLite Database   │
+│   (Renderer Process)│◄──►│   (Main Process)     │◄──►│   with FTS5 Search  │
+│                     │    │                      │    │                     │
+│ • Video Library UI  │    │ • Video Scanner      │    │ • Video Metadata    │
+│ • Search Interface  │    │ • Database Manager   │    │ • Transcript Data   │
+│ • Transcription UI  │    │ • IPC Handlers       │    │ • Full-Text Index   │
+└─────────────────────┘    └──────────────────────┘    └─────────────────────┘
+         │                           │
+         └─────── IPC Channels ──────┘
+```
+
+### **Why SQLite Database?**
+The SQLite database is the backbone of the search functionality:
+
+- **Video Metadata**: Stores file paths, sizes, durations, and transcription status
+- **Transcript Segments**: Stores time-stamped transcript text with confidence scores
+- **FTS5 Full-Text Search**: Enables lightning-fast searching through transcript content
+- **Search History**: Tracks user queries for analytics and suggestions
+- **Offline Operation**: Works completely offline with no external dependencies
+- **Memory Fallback**: Gracefully falls back to in-memory storage if SQLite fails
+
+### **Why IPC (Inter-Process Communication)?**
+IPC provides secure communication between frontend and backend:
+
+- **Security**: Prevents direct Node.js API exposure to the frontend
+- **Process Isolation**: Keeps UI responsive by separating heavy operations
+- **Type Safety**: Strongly typed communication channels
+- **Error Handling**: Centralized error handling for all backend operations
+
+## Features (Currently Implemented)
+
+- ✅ **Folder Selection**: Select directories containing video files
+- ✅ **Video Scanning**: Recursively scan folders for supported video formats
+- ✅ **Database Storage**: SQLite with FTS5 full-text search capabilities
+- ✅ **Mock Transcription**: Simulated AI transcription with dummy data
+- ✅ **Real-time Search**: Search transcripts as you type
+- ✅ **Video Library**: View all videos with transcription status
+- ✅ **Responsive UI**: Clean interface with status indicators
+- ✅ **Memory Fallback**: Works even without SQLite
 
 ## Tech Stack
 
-- **Frontend**: Electron + React (JavaScript)
-- **Backend**: Node.js + TypeScript
+- **Frontend**: React + TypeScript (Electron Renderer Process)
+- **Backend**: Node.js + TypeScript (Electron Main Process)
 - **Database**: SQLite with FTS5 (Full-Text Search)
-- **UI Styling**: Custom CSS
-- **Build Tools**: Webpack, TypeScript Compiler
+- **Communication**: IPC (Inter-Process Communication)
+- **Build Tools**: Webpack + TypeScript Compiler
+- **Styling**: Custom CSS
 
 ## Installation & Setup
 
@@ -44,34 +80,7 @@ A desktop application that helps users search their personal video files by spok
    npm start
    ```
 
-## Git Repository Cleanup
-
-If you have too many uncommitted changes, you can clean up your git repository:
-
-```bash
-# Remove untracked files and directories (be careful!)
-git clean -fd
-
-# Reset any staged changes
-git reset HEAD .
-
-# Check what files are still modified
-git status
-
-# Add only the files you want to commit
-git add src/ package.json README.md PROJECT_PLAN.md .gitignore
-
-# Commit your changes
-git commit -m "Add MVP video search application"
-```
-
-The `.gitignore` file has been updated to exclude:
-- `node_modules/` - Dependencies
-- `dist/` - Build outputs  
-- `*.db` - Database files
-- IDE and OS specific files
-
-## Development
+## Development Commands
 
 - **Development mode** (with hot reload):
   ```bash
@@ -93,92 +102,141 @@ The `.gitignore` file has been updated to exclude:
   npm run build:renderer
   ```
 
-## How to Use
+## How It Works
 
-1. **Launch the app** using `npm start`
+### 1. **Video Discovery**
+- User selects a folder containing video files
+- `VideoScanner` recursively scans directories
+- Supported formats: `.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.m4v`, `.wmv`, `.flv`
+- Video metadata is stored in SQLite database
 
-2. **Select Video Folder**: Click "Select Video Folder" to choose a directory containing your video files
+### 2. **Mock Transcription Process**
+- Currently uses dummy transcript data for MVP
+- Simulates AI transcription with realistic delay
+- Stores transcript segments with timestamps and confidence scores
+- Updates video transcription status in real-time
 
-3. **Scan Videos**: The app will automatically scan the selected folder and detect supported video formats
+### 3. **Search Functionality**
+- Uses SQLite FTS5 for full-text search
+- Searches across all transcript segments
+- Returns results with video context and timestamps
+- Ranks results by relevance
 
-4. **Transcribe Videos**: Click the "Transcribe" button on any video card to start the transcription process (currently uses mock data)
-
-5. **Search Transcripts**: Use the search bar to find specific content within transcribed videos
-
-6. **View Results**: Search results show matching segments with timestamps
+### 4. **Data Flow**
+```
+Frontend Request → IPC Channel → Backend Handler → Database Operation → Response
+```
 
 ## Project Structure
 
 ```
-video-search-app/
-├── src/
-│   ├── main/                 # Electron main process (TypeScript)
-│   │   ├── main.ts          # Main application entry
-│   │   ├── preload.ts       # Preload script for IPC
-│   │   ├── database/        # SQLite database management
-│   │   ├── video/           # Video file scanning
-│   │   └── ipc/             # IPC handlers
-│   ├── renderer/            # React frontend (JavaScript)
-│   │   ├── index.js         # React app entry
-│   │   ├── App.js           # Main React component
-│   │   ├── App.css          # Styling
-│   │   └── types/           # TypeScript definitions
-│   └── shared/              # Shared types and constants
-├── dist/                    # Built application
-├── package.json
-├── tsconfig.json           # TypeScript config for renderer
-├── tsconfig.main.json      # TypeScript config for main
-└── webpack.config.js       # Webpack config for renderer
+src/
+├── main/                     # Electron Main Process (Backend)
+│   ├── main.ts              # Application entry point
+│   ├── preload.ts           # IPC bridge for security
+│   ├── database/            # SQLite database management
+│   │   ├── database.ts      # Database operations & fallback
+│   │   └── schema.sql       # Database schema with FTS5
+│   ├── ipc/                 # Inter-Process Communication
+│   │   └── handlers.ts      # All IPC request handlers
+│   └── video/               # Video processing logic
+│       └── video-scanner.ts # File system scanning
+├── renderer/                # React Frontend (UI)
+│   ├── App.tsx             # Main React component
+│   ├── App.css             # Styling
+│   ├── index.tsx           # React entry point
+│   └── types/              # TypeScript definitions
+└── shared/                  # Shared Types & Constants
+    └── types.ts            # Common interfaces & IPC channels
 ```
-
-## Architecture Diagram
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Electron/     │    │   Node.js        │    │   SQLite        │
-│   React UI      │◄──►│   Backend        │◄──►│   Database      │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌──────────────────┐
-                       │   FFmpeg +       │
-                       │   Whisper        │
-                       └──────────────────┘
-
 
 ## Database Schema
 
-The app uses SQLite with the following tables:
+```sql
+-- Video metadata
+CREATE TABLE videos (
+    id INTEGER PRIMARY KEY,
+    file_path TEXT UNIQUE,
+    file_name TEXT,
+    file_size INTEGER,
+    duration REAL,
+    transcription_status TEXT DEFAULT 'pending'
+);
 
-- **videos**: Store video file metadata
-- **transcript_segments**: Store transcript text with timestamps
-- **transcripts**: FTS5 virtual table for full-text search
-- **search_history**: Track user search queries
+-- Transcript segments with timestamps
+CREATE TABLE transcript_segments (
+    id INTEGER PRIMARY KEY,
+    video_id INTEGER,
+    start_time REAL,
+    end_time REAL,
+    text TEXT,
+    confidence REAL,
+    FOREIGN KEY (video_id) REFERENCES videos(id)
+);
+
+-- FTS5 virtual table for full-text search
+CREATE VIRTUAL TABLE transcripts USING fts5(
+    video_id UNINDEXED,
+    start_time UNINDEXED,
+    end_time UNINDEXED,
+    text,
+    confidence UNINDEXED
+);
+```
 
 ## Current Limitations (MVP)
 
-- **Mock Transcription**: Uses dummy transcript data instead of real AI transcription
-- **No Video Player**: Cannot play videos within the app yet
-- **Basic UI**: Minimal styling and features
-- **No Real-time Updates**: Manual refresh needed for some operations
+- **Mock Transcription**: Uses dummy data instead of real AI transcription
+- **No Video Playback**: Cannot play videos or jump to timestamps
+- **Basic Metadata**: No video duration or thumbnail extraction
+- **No Semantic Search**: Only keyword-based search currently
 
 ## Next Steps (Full Implementation)
 
-1. **Real AI Transcription**: Integrate OpenAI Whisper for actual speech-to-text
-2. **Video Player**: Add video playback with timestamp navigation
-3. **FFmpeg Integration**: Extract audio and get video metadata
-4. **Semantic Search**: Add AI-powered semantic search capabilities
-5. **Advanced UI**: Improve design, add dark mode, keyboard shortcuts
-6. **Performance Optimization**: Handle large video collections efficiently
-7. **Cross-platform Testing**: Ensure compatibility across Windows, macOS, Linux
+1. **Real AI Transcription**: 
+   - Integrate OpenAI Whisper for speech-to-text
+   - Add FFmpeg for audio extraction
+   
+2. **Enhanced Search**:
+   - Add semantic search capabilities
+   - Implement search suggestions and history
+   
+3. **Video Player Integration**:
+   - Embed video player with timestamp navigation
+   - Add thumbnail generation
+   
+4. **Performance Optimizations**:
+   - Background transcription queue
+   - Incremental indexing for large collections
+   
+5. **UI/UX Improvements**:
+   - Dark mode support
+   - Keyboard shortcuts
+   - Better progress indicators
+
+## Git Repository Cleanup
+
+If you have too many uncommitted changes:
+
+```bash
+# Remove untracked files (be careful!)
+git clean -fd
+
+# Reset staged changes
+git reset HEAD .
+
+# Add only the files you want
+git add src/ package.json README.md .gitignore
+
+# Commit your changes
+git commit -m "Update video search application"
+```
 
 ## Troubleshooting
 
-- **Build Errors**: Make sure all dependencies are installed with `npm install`
 - **Database Issues**: Delete the database file in your user data directory to reset
-- **Permission Errors**: Ensure the app has permission to read your video folders
-
-## Contributing
-
-This is an MVP implementation. For the full roadmap, see `PROJECT_PLAN.md`.
+- **Build Errors**: Ensure all dependencies are installed with `npm install`
+- **Permission Errors**: Check app permissions for reading video folders
 
 ## License
 
