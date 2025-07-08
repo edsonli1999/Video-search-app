@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { VideoFile, SearchResult } from '../shared/types';
-import './types/electron';
 import './App.css';
 
 const App: React.FC = () => {
