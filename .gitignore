@@ -82,7 +82,6 @@ temp/
 *.zip
 *.tar.gz
 *.rar
-=======
 # Python
 venv/
 __pycache__/
