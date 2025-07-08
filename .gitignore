@@ -1,3 +1,4 @@
+
 # Dependencies
 node_modules/
 npm-debug.log*
@@ -81,6 +82,21 @@ temp/
 *.zip
 *.tar.gz
 *.rar
+=======
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Node.js
+node_modules/
+
+# Database
+*.db
+
+# Logs
+*.log
+
 code_base_preedit.zip
 code_base_raven_postedit.zip
 code_base_sonnet_postedit.zip
