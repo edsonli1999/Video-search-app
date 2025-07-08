@@ -131,6 +131,19 @@ video-search-app/
 └── webpack.config.js       # Webpack config for renderer
 ```
 
+## Architecture Diagram
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Electron/     │    │   Node.js        │    │   SQLite        │
+│   React UI      │◄──►│   Backend        │◄──►│   Database      │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                              │
+                              ▼
+                       ┌──────────────────┐
+                       │   FFmpeg +       │
+                       │   Whisper        │
+                       └──────────────────┘
+
+
 ## Database Schema
 
 The app uses SQLite with the following tables:
