@@ -11,38 +11,75 @@ export class VideoDatabase {
     console.log('🔧 DB: Starting database initialization...');
 
     try {
-      // Step 1: Check Node.js version
+      // Step 1: Check Node.js version and environment
       console.log('🔧 DB: Node.js version:', process.version);
       console.log('🔧 DB: NODE_MODULE_VERSION:', process.versions.modules);
+      console.log('🔧 DB: Electron version:', process.versions.electron);
+      console.log('🔧 DB: V8 version:', process.versions.v8);
 
-      // Step 2: Try to import better-sqlite3
-      console.log('🔧 DB: Attempting to import better-sqlite3...');
-      const Database = require('better-sqlite3');
-      console.log('🔧 DB: better-sqlite3 import successful');
+      // Step 2: Try to import sqlite3 with detailed error handling
+      console.log('🔧 DB: Attempting to import sqlite3...');
+      let sqlite3;
+      try {
+        sqlite3 = require('sqlite3');
+        console.log('🔧 DB: sqlite3 import successful');
+      } catch (importError) {
+        console.error('❌ Failed to import sqlite3:', importError);
+        throw importError;
+      }
 
-      // Step 3: Check paths
+      // Step 3: Check paths and permissions
       const userDataPath = app.getPath('userData');
       const dbPath = path.join(userDataPath, 'videos.db');
       console.log('🔧 DB: User data path:', userDataPath);
       console.log('🔧 DB: Database path:', dbPath);
 
-      // Step 4: Create directory
+      // Step 4: Check if we can write to the directory
+      console.log('🔧 DB: Checking directory permissions...');
+      try {
+        fs.accessSync(userDataPath, fs.constants.W_OK);
+        console.log('🔧 DB: Write access to user data directory: ✅');
+      } catch (accessError) {
+        console.error('❌ No write access to user data directory:', accessError);
+        throw accessError;
+      }
+
+      // Step 5: Create directory if it doesn't exist
       console.log('🔧 DB: Creating directory...');
       fs.mkdirSync(path.dirname(dbPath), { recursive: true });
       console.log('🔧 DB: Directory created successfully');
 
-      // Step 5: Initialize database
-      console.log('🔧 DB: Initializing database...');
-      this.db = new Database(dbPath);
-      console.log('🔧 DB: Database object created');
+      // Step 6: Check if database file already exists and its permissions
+      if (fs.existsSync(dbPath)) {
+        console.log('🔧 DB: Database file already exists');
+        try {
+          fs.accessSync(dbPath, fs.constants.R_OK | fs.constants.W_OK);
+          console.log('🔧 DB: Database file permissions: ✅');
+        } catch (permError) {
+          console.error('❌ Database file permission error:', permError);
+          throw permError;
+        }
+      } else {
+        console.log('🔧 DB: Database file will be created');
+      }
 
-      // Step 6: Set pragmas
+      // Step 7: Initialize database with detailed error handling
+      console.log('🔧 DB: Initializing database...');
+      try {
+        this.db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE);
+        console.log('🔧 DB: Database object created');
+      } catch (dbInitError) {
+        console.error('❌ Database initialization failed:', dbInitError);
+        throw dbInitError;
+      }
+
+      // Step 8: Set pragmas
       console.log('🔧 DB: Setting pragmas...');
-      this.db.pragma('journal_mode = WAL');
-      this.db.pragma('foreign_keys = ON');
+      this.db.run('PRAGMA journal_mode = WAL');
+      this.db.run('PRAGMA foreign_keys = ON');
       console.log('🔧 DB: Pragmas set');
 
-      // Step 7: Initialize schema
+      // Step 9: Initialize schema
       console.log('🔧 DB: Initializing schema...');
       this.initializeDatabase();
       console.log('🔧 DB: Schema initialized');
@@ -57,12 +94,17 @@ export class VideoDatabase {
         console.error('Error type:', error.constructor.name);
         console.error('Error message:', error.message);
         console.error('Full error:', error);
+        console.error('Stack trace:', error.stack);
         
         // Additional diagnostic info
         if (error.message.includes('NODE_MODULE_VERSION')) {
           console.error('🔧 This is a Node.js version mismatch issue');
           console.error('🔧 Your system Node.js:', process.version);
           console.error('🔧 Electron uses a different Node.js version');
+          console.error('🔧 Consider rebuilding sqlite3 for the correct Node.js version');
+        } else if (error.message.includes('sqlite3')) {
+          console.error('🔧 This may be a native module compilation issue');
+          console.error('🔧 Try running: npm rebuild sqlite3');
         }
       } else {
         console.error('Unknown error type:', error);
@@ -82,6 +124,7 @@ export class VideoDatabase {
   }
 
   private initializeDatabase(): void {
+    // Use the correct path to schema.sql - it should be in the same directory as this file
     const schemaPath = path.join(__dirname, 'schema.sql');
     const schema = fs.readFileSync(schemaPath, 'utf-8');
     this.db.exec(schema);
