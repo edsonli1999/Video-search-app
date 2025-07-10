@@ -8,27 +8,67 @@ export class VideoDatabase {
   private isAvailable: boolean = false;
 
   constructor() {
+    console.log('🔧 DB: Starting database initialization...');
+
     try {
-      // Try to import better-sqlite3 dynamically
+      // Step 1: Check Node.js version
+      console.log('🔧 DB: Node.js version:', process.version);
+      console.log('🔧 DB: NODE_MODULE_VERSION:', process.versions.modules);
+
+      // Step 2: Try to import better-sqlite3
+      console.log('🔧 DB: Attempting to import better-sqlite3...');
       const Database = require('better-sqlite3');
-      
+      console.log('🔧 DB: better-sqlite3 import successful');
+
+      // Step 3: Check paths
       const userDataPath = app.getPath('userData');
       const dbPath = path.join(userDataPath, 'videos.db');
-      
-      // Ensure the directory exists
+      console.log('🔧 DB: User data path:', userDataPath);
+      console.log('🔧 DB: Database path:', dbPath);
+
+      // Step 4: Create directory
+      console.log('🔧 DB: Creating directory...');
       fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-      
+      console.log('🔧 DB: Directory created successfully');
+
+      // Step 5: Initialize database
+      console.log('🔧 DB: Initializing database...');
       this.db = new Database(dbPath);
+      console.log('🔧 DB: Database object created');
+
+      // Step 6: Set pragmas
+      console.log('🔧 DB: Setting pragmas...');
       this.db.pragma('journal_mode = WAL');
       this.db.pragma('foreign_keys = ON');
-      
+      console.log('🔧 DB: Pragmas set');
+
+      // Step 7: Initialize schema
+      console.log('🔧 DB: Initializing schema...');
       this.initializeDatabase();
+      console.log('🔧 DB: Schema initialized');
+
       this.isAvailable = true;
-      console.log('Database initialized successfully');
+      console.log('✅ Database initialized successfully');
+
     } catch (error) {
-      console.warn('Database not available, running in memory-only mode:', error instanceof Error ? error.message : String(error));
+      console.error('❌ Database initialization failed:');
+      
+      if (error instanceof Error) {
+        console.error('Error type:', error.constructor.name);
+        console.error('Error message:', error.message);
+        console.error('Full error:', error);
+        
+        // Additional diagnostic info
+        if (error.message.includes('NODE_MODULE_VERSION')) {
+          console.error('🔧 This is a Node.js version mismatch issue');
+          console.error('🔧 Your system Node.js:', process.version);
+          console.error('🔧 Electron uses a different Node.js version');
+        }
+      } else {
+        console.error('Unknown error type:', error);
+      }
+
       this.isAvailable = false;
-      // Initialize in-memory storage
       this.initializeMemoryStorage();
     }
   }
@@ -54,7 +94,7 @@ export class VideoDatabase {
         INSERT INTO videos (file_path, file_name, file_size, duration, transcription_status)
         VALUES (?, ?, ?, ?, ?)
       `);
-      
+
       const result = stmt.run(
         video.filePath,
         video.fileName,
@@ -62,7 +102,7 @@ export class VideoDatabase {
         video.duration || null,
         video.transcriptionStatus
       );
-      
+
       return result.lastInsertRowid as number;
     } else {
       // Memory-based implementation
@@ -83,7 +123,7 @@ export class VideoDatabase {
       const stmt = this.db.prepare(`
         SELECT * FROM videos WHERE file_path = ?
       `);
-      
+
       const row = stmt.get(filePath) as any;
       return row ? this.mapRowToVideo(row) : null;
     } else {
@@ -97,7 +137,7 @@ export class VideoDatabase {
       const stmt = this.db.prepare(`
         SELECT * FROM videos ORDER BY created_at DESC
       `);
-      
+
       const rows = stmt.all() as any[];
       return rows.map(row => this.mapRowToVideo(row));
     } else {
@@ -112,7 +152,7 @@ export class VideoDatabase {
         UPDATE videos SET transcription_status = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `);
-      
+
       stmt.run(status, videoId);
     } else {
       // Memory-based implementation
@@ -171,7 +211,7 @@ export class VideoDatabase {
         WHERE video_id = ? 
         ORDER BY start_time ASC
       `);
-      
+
       const rows = stmt.all(videoId) as any[];
       return rows.map(row => this.mapRowToTranscriptSegment(row));
     } else {
@@ -184,7 +224,7 @@ export class VideoDatabase {
   searchTranscripts(query: string, limit: number = 50): SearchResult[] {
     console.log('🔍 DB: searchTranscripts called with query:', query, 'limit:', limit);
     console.log('🔍 DB: Database available:', this.isAvailable);
-    
+
     if (this.isAvailable) {
       console.log('🔍 DB: Using database search');
       // Save search to history
@@ -213,13 +253,13 @@ export class VideoDatabase {
       const rows = stmt.all(query, limit) as any[];
       console.log('🔍 DB: Raw database rows:', rows);
       console.log('🔍 DB: Number of raw rows:', rows.length);
-      
+
       // Group results by video
       const videoMap = new Map<number, SearchResult>();
-      
+
       for (const row of rows) {
         const videoId = row.video_id;
-        
+
         if (!videoMap.has(videoId)) {
           videoMap.set(videoId, {
             videoId,
@@ -229,7 +269,7 @@ export class VideoDatabase {
             relevanceScore: row.rank
           });
         }
-        
+
         const searchResult = videoMap.get(videoId)!;
         searchResult.segments.push({
           id: row.id,
@@ -244,32 +284,32 @@ export class VideoDatabase {
       const finalResults = Array.from(videoMap.values());
       console.log('🔍 DB: Final grouped results:', finalResults);
       console.log('🔍 DB: Number of final results:', finalResults.length);
-      
+
       return finalResults;
     } else {
       console.log('🔍 DB: Using memory-based search');
       console.log('🔍 DB: Memory videos count:', this.memoryVideos.length);
       console.log('🔍 DB: Memory transcripts count:', this.memoryTranscripts.size);
-      
+
       // Memory-based implementation - simple text search
       const results: SearchResult[] = [];
       const queryLower = query.toLowerCase();
-      
+
       for (const video of this.memoryVideos) {
         console.log('🔍 DB: Checking video:', video.fileName, 'ID:', video.id);
         const segments = this.memoryTranscripts.get(video.id!) || [];
         console.log('🔍 DB: Video segments count:', segments.length);
-        
+
         if (segments.length > 0) {
           console.log('🔍 DB: Sample segment text:', segments[0].text);
         }
-        
-        const matchingSegments = segments.filter(segment => 
+
+        const matchingSegments = segments.filter(segment =>
           segment.text.toLowerCase().includes(queryLower)
         );
-        
+
         console.log('🔍 DB: Matching segments for video:', matchingSegments.length);
-        
+
         if (matchingSegments.length > 0) {
           const result = {
             videoId: video.id!,
@@ -282,11 +322,11 @@ export class VideoDatabase {
           results.push(result);
         }
       }
-      
+
       const finalResults = results.slice(0, limit);
       console.log('🔍 DB: Memory-based final results:', finalResults);
       console.log('🔍 DB: Memory-based final results count:', finalResults.length);
-      
+
       return finalResults;
     }
   }
@@ -308,7 +348,7 @@ export class VideoDatabase {
         ORDER BY timestamp DESC 
         LIMIT ?
       `);
-      
+
       const rows = stmt.all(limit) as any[];
       return rows.map(row => row.query);
     } else {
