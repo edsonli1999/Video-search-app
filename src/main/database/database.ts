@@ -182,7 +182,11 @@ export class VideoDatabase {
 
   // Search operations
   searchTranscripts(query: string, limit: number = 50): SearchResult[] {
+    console.log('🔍 DB: searchTranscripts called with query:', query, 'limit:', limit);
+    console.log('🔍 DB: Database available:', this.isAvailable);
+    
     if (this.isAvailable) {
+      console.log('🔍 DB: Using database search');
       // Save search to history
       this.saveSearchHistory(query);
 
@@ -205,7 +209,10 @@ export class VideoDatabase {
         LIMIT ?
       `);
 
+      console.log('🔍 DB: Executing database query');
       const rows = stmt.all(query, limit) as any[];
+      console.log('🔍 DB: Raw database rows:', rows);
+      console.log('🔍 DB: Number of raw rows:', rows.length);
       
       // Group results by video
       const videoMap = new Map<number, SearchResult>();
@@ -234,30 +241,53 @@ export class VideoDatabase {
         });
       }
 
-      return Array.from(videoMap.values());
+      const finalResults = Array.from(videoMap.values());
+      console.log('🔍 DB: Final grouped results:', finalResults);
+      console.log('🔍 DB: Number of final results:', finalResults.length);
+      
+      return finalResults;
     } else {
+      console.log('🔍 DB: Using memory-based search');
+      console.log('🔍 DB: Memory videos count:', this.memoryVideos.length);
+      console.log('🔍 DB: Memory transcripts count:', this.memoryTranscripts.size);
+      
       // Memory-based implementation - simple text search
       const results: SearchResult[] = [];
       const queryLower = query.toLowerCase();
       
       for (const video of this.memoryVideos) {
+        console.log('🔍 DB: Checking video:', video.fileName, 'ID:', video.id);
         const segments = this.memoryTranscripts.get(video.id!) || [];
+        console.log('🔍 DB: Video segments count:', segments.length);
+        
+        if (segments.length > 0) {
+          console.log('🔍 DB: Sample segment text:', segments[0].text);
+        }
+        
         const matchingSegments = segments.filter(segment => 
           segment.text.toLowerCase().includes(queryLower)
         );
         
+        console.log('🔍 DB: Matching segments for video:', matchingSegments.length);
+        
         if (matchingSegments.length > 0) {
-          results.push({
+          const result = {
             videoId: video.id!,
             videoPath: video.filePath,
             videoName: video.fileName,
             segments: matchingSegments,
             relevanceScore: matchingSegments.length
-          });
+          };
+          console.log('🔍 DB: Adding result:', result);
+          results.push(result);
         }
       }
       
-      return results.slice(0, limit);
+      const finalResults = results.slice(0, limit);
+      console.log('🔍 DB: Memory-based final results:', finalResults);
+      console.log('🔍 DB: Memory-based final results count:', finalResults.length);
+      
+      return finalResults;
     }
   }
 

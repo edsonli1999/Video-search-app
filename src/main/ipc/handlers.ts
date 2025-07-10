@@ -49,13 +49,26 @@ export function setupIpcHandlers(): void {
 
   // Handle search
   ipcMain.handle(IPC_CHANNELS.SEARCH_VIDEOS, async (event, query: string) => {
+    console.log('🔍 IPC: SEARCH_VIDEOS handler called with query:', query);
+    
     try {
       if (!query.trim()) {
+        console.log('🔍 IPC: Empty query, returning empty array');
         return [];
       }
-      return db.searchTranscripts(query);
+      
+      console.log('🔍 IPC: Calling db.searchTranscripts with:', query);
+      const results = db.searchTranscripts(query);
+      console.log('🔍 IPC: Database search results:', results);
+      console.log('🔍 IPC: Number of results from database:', results.length);
+      
+      if (results.length > 0) {
+        console.log('🔍 IPC: First result from database:', results[0]);
+      }
+      
+      return results;
     } catch (error) {
-      console.error('Error searching videos:', error);
+      console.error('🔍 IPC: Error searching videos:', error);
       throw error;
     }
   });

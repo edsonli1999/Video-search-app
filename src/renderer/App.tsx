@@ -11,17 +11,31 @@ const App: React.FC = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [currentVideo, setCurrentVideo] = useState<VideoFile | null>(null);
 
+  console.log('🔍 App render - searchQuery:', searchQuery);
+  console.log('🔍 App render - searchResults:', searchResults);
+  console.log('🔍 App render - searchResults.length:', searchResults.length);
+  console.log('🔍 App render - isSearching:', isSearching);
+
   // Load existing videos on app start
   useEffect(() => {
     loadVideos();
   }, []);
 
   const loadVideos = async () => {
+    console.log('🔍 loadVideos called');
     try {
       const allVideos = await window.electronAPI.getVideos();
+      console.log('🔍 Videos loaded:', allVideos);
+      console.log('🔍 Number of videos:', allVideos.length);
+      
+      // Log transcription status of each video
+      allVideos.forEach((video, index) => {
+        console.log(`🔍 Video ${index + 1}: ${video.fileName} - Status: ${video.transcriptionStatus}`);
+      });
+      
       setVideos(allVideos);
     } catch (error) {
-      console.error('Error loading videos:', error);
+      console.error('🔍 Error loading videos:', error);
     }
   };
 
@@ -43,18 +57,32 @@ const App: React.FC = () => {
   };
 
   const handleSearch = async (query: string) => {
+    console.log('🔍 handleSearch called with query:', query);
+    
     if (!query.trim()) {
+      console.log('🔍 Empty query, clearing results');
       setSearchResults([]);
       return;
     }
 
+    console.log('🔍 Starting search, setting isSearching to true');
     setIsSearching(true);
     try {
+      console.log('🔍 Calling window.electronAPI.searchVideos with:', query);
       const results = await window.electronAPI.searchVideos(query);
+      console.log('🔍 Search results received:', results);
+      console.log('🔍 Number of results:', results.length);
+      
+      if (results.length > 0) {
+        console.log('🔍 First result details:', results[0]);
+      }
+      
       setSearchResults(results);
+      console.log('🔍 Search results state updated');
     } catch (error) {
-      console.error('Error searching:', error);
+      console.error('🔍 Error searching:', error);
     } finally {
+      console.log('🔍 Setting isSearching to false');
       setIsSearching(false);
     }
   };
@@ -122,6 +150,7 @@ const App: React.FC = () => {
               placeholder="Search video transcripts..."
               value={searchQuery}
               onChange={(e) => {
+                console.log('🔍 Input onChange - new value:', e.target.value);
                 setSearchQuery(e.target.value);
                 handleSearch(e.target.value);
               }}
@@ -133,21 +162,27 @@ const App: React.FC = () => {
           {searchResults.length > 0 && (
             <div className="search-results">
               <h3>Search Results ({searchResults.length})</h3>
-              {searchResults.map((result) => (
+              {searchResults.map((result) => {
+                console.log('🔍 Rendering search result:', result);
+                return (
                 <div key={result.videoId} className="search-result">
                   <h4>{result.videoName}</h4>
                   <div className="result-segments">
-                    {result.segments.map((segment) => (
+                      {result.segments.map((segment) => {
+                        console.log('🔍 Rendering segment:', segment);
+                        return (
                       <div key={segment.id} className="segment">
                         <span className="timestamp">
                           {formatTime(segment.startTime)} - {formatTime(segment.endTime)}
                         </span>
                         <p className="segment-text">{segment.text}</p>
                       </div>
-                    ))}
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
