@@ -17,14 +17,14 @@ export class VideoDatabase {
       console.log('🔧 DB: Electron version:', process.versions.electron);
       console.log('🔧 DB: V8 version:', process.versions.v8);
 
-      // Step 2: Try to import sqlite3 with detailed error handling
-      console.log('🔧 DB: Attempting to import sqlite3...');
-      let sqlite3;
+      // Step 2: Try to import better-sqlite3 with detailed error handling
+      console.log('🔧 DB: Attempting to import better-sqlite3...');
+      let Database;
       try {
-        sqlite3 = require('sqlite3');
-        console.log('🔧 DB: sqlite3 import successful');
+        Database = require('better-sqlite3');
+        console.log('🔧 DB: better-sqlite3 import successful');
       } catch (importError) {
-        console.error('❌ Failed to import sqlite3:', importError);
+        console.error('❌ Failed to import better-sqlite3:', importError);
         throw importError;
       }
 
@@ -66,7 +66,7 @@ export class VideoDatabase {
       // Step 7: Initialize database with detailed error handling
       console.log('🔧 DB: Initializing database...');
       try {
-        this.db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE);
+        this.db = new Database(dbPath);
         console.log('🔧 DB: Database object created');
       } catch (dbInitError) {
         console.error('❌ Database initialization failed:', dbInitError);
@@ -75,8 +75,8 @@ export class VideoDatabase {
 
       // Step 8: Set pragmas
       console.log('🔧 DB: Setting pragmas...');
-      this.db.run('PRAGMA journal_mode = WAL');
-      this.db.run('PRAGMA foreign_keys = ON');
+      this.db.pragma('journal_mode = WAL');
+      this.db.pragma('foreign_keys = ON');
       console.log('🔧 DB: Pragmas set');
 
       // Step 9: Initialize schema
@@ -101,10 +101,10 @@ export class VideoDatabase {
           console.error('🔧 This is a Node.js version mismatch issue');
           console.error('🔧 Your system Node.js:', process.version);
           console.error('🔧 Electron uses a different Node.js version');
-          console.error('🔧 Consider rebuilding sqlite3 for the correct Node.js version');
-        } else if (error.message.includes('sqlite3')) {
+          console.error('🔧 Consider rebuilding better-sqlite3 for the correct Node.js version');
+        } else if (error.message.includes('better-sqlite3')) {
           console.error('🔧 This may be a native module compilation issue');
-          console.error('🔧 Try running: npm rebuild sqlite3');
+          console.error('🔧 Try running: npm rebuild better-sqlite3');
         }
       } else {
         console.error('Unknown error type:', error);
