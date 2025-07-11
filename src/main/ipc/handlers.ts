@@ -40,7 +40,7 @@ export function setupIpcHandlers(): void {
   // Handle getting all videos
   ipcMain.handle(IPC_CHANNELS.GET_VIDEOS, async () => {
     try {
-      return db.getAllVideos();
+      return await db.getAllVideos();
     } catch (error) {
       console.error('Error getting videos:', error);
       throw error;
@@ -58,7 +58,7 @@ export function setupIpcHandlers(): void {
       }
       
       console.log('🔍 IPC: Calling db.searchTranscripts with:', query);
-      const results = db.searchTranscripts(query);
+      const results = await db.searchTranscripts(query);
       console.log('🔍 IPC: Database search results:', results);
       console.log('🔍 IPC: Number of results from database:', results.length);
       
@@ -76,7 +76,7 @@ export function setupIpcHandlers(): void {
   // Handle getting transcript for a video
   ipcMain.handle(IPC_CHANNELS.GET_TRANSCRIPT, async (event, videoId: number) => {
     try {
-      return db.getTranscriptSegments(videoId);
+      return await db.getTranscriptSegments(videoId);
     } catch (error) {
       console.error('Error getting transcript:', error);
       throw error;
@@ -90,7 +90,7 @@ export function setupIpcHandlers(): void {
       // In full implementation, this would trigger actual transcription
       
       // Update status to processing
-      db.updateVideoTranscriptionStatus(videoId, 'processing');
+      await db.updateVideoTranscriptionStatus(videoId, 'processing');
       
       // Simulate transcription delay
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -117,13 +117,13 @@ export function setupIpcHandlers(): void {
         }
       ];
       
-      db.insertTranscriptSegments(videoId, dummySegments);
-      db.updateVideoTranscriptionStatus(videoId, 'completed');
+      await db.insertTranscriptSegments(videoId, dummySegments);
+      await db.updateVideoTranscriptionStatus(videoId, 'completed');
       
       return { success: true, message: 'Transcription completed' };
     } catch (error) {
       console.error('Error transcribing video:', error);
-      db.updateVideoTranscriptionStatus(videoId, 'failed');
+      await db.updateVideoTranscriptionStatus(videoId, 'failed');
       throw error;
     }
   });

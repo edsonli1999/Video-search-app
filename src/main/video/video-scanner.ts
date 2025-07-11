@@ -14,9 +14,9 @@ export class VideoScanner {
       
       // Store new videos in database
       for (const video of videoFiles) {
-        const existing = this.db.getVideoByPath(video.filePath);
+        const existing = await this.db.getVideoByPath(video.filePath);
         if (!existing) {
-          const videoId = this.db.insertVideo(video);
+          const videoId = await this.db.insertVideo(video);
           video.id = videoId;
         } else {
           // Update existing video info if needed
