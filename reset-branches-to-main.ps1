@@ -12,3 +12,6 @@ foreach ($branch in $branches) {
     git push --force origin $branch
     Write-Host "Completed: $branch" -ForegroundColor Yellow
 }
+
+Write-Host "Going back to main" -ForegroundColor Cyan
+git checkout main
