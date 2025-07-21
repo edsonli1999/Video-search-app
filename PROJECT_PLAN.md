@@ -3,16 +3,14 @@
 ## Project Overview
 A cross-platform desktop application that enables users to search their personal video files by spoken content using local AI transcription, working completely offline.
 
-
+## Current Status Summary
+- ✅ **Infrastructure**: Electron app, SQLite database, video scanning, search UI
+- ✅ **Database**: Full-text search ready with FTS5, transcript storage schema implemented
+- ✅ **Video Management**: Folder selection, file scanning, metadata storage
+- ❌ **CRITICAL MISSING**: Real transcription pipeline (currently mocked with dummy data)
 
 ### 🔧 Build Architecture Resolution
 **Issue Resolved**: Fixed critical module resolution problem that was preventing proper application builds.
-
-**Problem**: Initial webpack configuration was attempting to bundle the Electron main process like a web application, which caused:
-- Module imports to break at runtime
-- Native modules (like better-sqlite3) to fail
-- File system operations to become unreliable
-- Over-bundling of Node.js modules into a single minified file
 
 **Solution Implemented**: Hybrid build approach
 - **Main Process**: Uses TypeScript compiler (`tsc`) to preserve module structure
@@ -24,27 +22,14 @@ A cross-platform desktop application that enables users to search their personal
 2. **Native Module Support**: Better-sqlite3 and other native modules work correctly
 3. **Dynamic Imports**: File system operations and dynamic requires function properly
 4. **Debugging**: Readable, non-minified code in the main process for easier debugging
-5. **Module Structure**: Preserves the intended architecture with separate IPC, database, and video processing modules
-
-**Build Configuration**:
-```json
-{
-  "scripts": {
-    "build": "npm run build:main && npm run build:renderer",
-    "build:main": "tsc -p tsconfig.main.json",
-    "build:renderer": "webpack --mode production"
-  }
-}
-```
 
 ## Tech Stack
 - **Frontend**: Electron + React + TypeScript
 - **Backend**: Node.js + TypeScript
-- **Database**: SQLite with FTS5 (Full-Text Search) - *Currently failing, falls back to memory*
-- **AI Transcription**: OpenAI Whisper (via whisper.cpp or faster-whisper) - *Not implemented, currently mocked*
+- **Database**: SQLite with FTS5 (Full-Text Search) - *Functional*
+- **AI Transcription**: OpenAI Whisper (local implementation) - *Not implemented, currently mocked*
 - **Video Processing**: FFmpeg - *Not implemented*
 - **UI Framework**: Basic CSS (ShadCN planned for Phase 6)
-- **State Management**: React useState/useEffect (Context planned for Phase 6)
 - **Build Tools**: TypeScript Compiler (main), Webpack (renderer), Electron Builder
 
 ## Project Structure (Current)
@@ -56,11 +41,15 @@ video-search-app/
 │   │   ├── preload.ts       ✅ Complete (with inline types)
 │   │   ├── database/
 │   │   │   ├── schema.sql   ✅ Complete
-│   │   │   └── database.ts  🔄 Complete but database fails to initialize
+│   │   │   └── database.ts  ✅ Complete and functional
 │   │   ├── video/
 │   │   │   └── video-scanner.ts ✅ Complete
+│   │   ├── transcription/   ❌ TO BE CREATED (Phase 3)
+│   │   │   ├── audio-extractor.ts
+│   │   │   ├── whisper-transcriber.ts
+│   │   │   └── transcription-queue.ts
 │   │   └── ipc/
-│   │       └── handlers.ts  ✅ Complete (with mock transcription)
+│   │       └── handlers.ts  🔄 Complete but with mock transcription
 │   ├── renderer/             # React frontend (Webpack bundled)
 │   │   ├── App.tsx          ✅ Complete UI implementation
 │   │   ├── App.css          ✅ Basic styling
@@ -69,20 +58,8 @@ video-search-app/
 │   └── shared/               # Shared types and utilities
 │       └── types.ts         ✅ Complete
 ├── dist/                     # Build output
-│   ├── main/                # Compiled main process files
-│   │   ├── main.js
-│   │   ├── preload.js
-│   │   ├── database/
-│   │   ├── video/
-│   │   └── ipc/
-│   └── renderer/            # Bundled renderer files
-│       ├── bundle.js
-│       └── index.html
-├── package.json             ✅ Complete
-├── tsconfig.json           ✅ Complete
-├── tsconfig.main.json      ✅ Complete
-├── tsconfig.renderer.json  ✅ Complete
-└── webpack.config.js       ✅ Complete (renderer only)
+└── temp/                     ❌ TO BE CREATED (Phase 3)
+    └── audio/               # Temporary audio files for transcription
 ```
 
 ## Database Schema (Implemented but Not Functional)
@@ -132,115 +109,112 @@ CREATE TABLE search_history (
 ## Development Phases
 
 ### ✅ Phase 1: Project Setup & Basic Structure (COMPLETE)
-**Goals**: Set up development environment and basic Electron app
-- [x] Initialize Node.js project with TypeScript
-- [x] Configure Electron with React
-- [x] Set up build tools (TypeScript + Webpack hybrid approach)
-- [x] Create basic window and navigation
-- [x] Set up SQLite database connection with proper initialization
-- [x] Implement basic database schema
-- [x] Resolve module resolution and build architecture issues
-- [x] Fix SQLite database initialization issues
-- [x] Add proper database error handling and validation
-- [x] Test database functionality end-to-end
+**Status**: All deliverables completed, build architecture resolved, database functional
 
-**Deliverables**:
-- ✅ Working Electron app that opens
-- ✅ Database connection established and functional
-- ✅ Proper build architecture implemented
-- ✅ electron-rebuild integration for native module compatibility
+### ✅ Phase 2: Video File Management (COMPLETE) 
+**Status**: Core functionality complete, enhancements planned for later phases
 
-### ✅ Phase 2: Video File Management (COMPLETE)
-**Goals**: Implement video file selection and management
-- [x] Create folder selection dialog
-- [x] Scan folders for video files (.mp4, .mkv, .avi, .mov, .webm, .m4v, .wmv, .flv)
-- [x] Store video metadata in database with persistence
-- [x] Display video list in UI
-- [x] Handle file path validation and error cases
-- [x] Fix persistent video storage (database now functional)
-- [x] Basic UI for video list display
+### 🚨 Phase 3: Audio Extraction & Transcription Pipeline (CRITICAL - IN PROGRESS)
 
-**Remaining Work for Enhancement**:
-- [ ] Extract actual video metadata (duration, resolution, etc.)
-- [ ] Add video thumbnail generation (optional)
-- [ ] Improve error handling for corrupted video files
-- [ ] Enhance UI for video list display
+**Current Issue**: Core functionality is completely mocked - app appears functional but transcription generates dummy data.
 
-**Deliverables**:
-- ✅ Users can select video folders
-- ✅ Video files are detected and listed
-- ✅ Video metadata persisted between sessions
-- ✅ Functional UI for video management
+**Implementation Location**: Replace mock handler in `src/main/ipc/handlers.ts` (lines 84-130)
 
-### ❌ Phase 3: Audio Extraction & Transcription Pipeline (NOT STARTED)
-**Goals**: Implement core transcription functionality
-- [ ] **CRITICAL**: Replace mock transcription with real implementation
-- [ ] Integrate FFmpeg for audio extraction
-- [ ] Set up Whisper integration (whisper.cpp or Python wrapper)
-- [ ] Create transcription queue system
-- [ ] Implement progress tracking
-- [ ] Store transcripts with timestamps
-- [ ] Handle transcription errors gracefully
+#### 📋 Implementation Specifications
 
-**Current Status**: Only mock implementation exists that generates 3 hardcoded transcript segments
+**1. Dependencies to Add**
+```json
+{
+  "dependencies": {
+    "@xenova/transformers": "^2.17.0",  // Local Whisper implementation
+    "events": "^3.3.0"                   // Progress event handling
+  }
+}
+```
 
-**Deliverables**:
-- ❌ Audio extraction from video files (not implemented)
-- ❌ Working transcription pipeline (currently mocked)
-- ❌ Transcripts stored with timestamps (mock data only)
-- ❌ Progress indication for users (not implemented)
+**2. Whisper Integration**
+- **Library**: Use `@xenova/transformers` for local Whisper implementation
+- **Model**: `whisper-base` for balance of speed/accuracy (fallback to `whisper-tiny` if memory issues)
+- **Format**: Expects 16kHz mono WAV audio input
+- **Output**: Timestamped transcript segments with confidence scores
+- **Performance Target**: >1x real-time transcription speed
+
+**3. FFmpeg Audio Extraction**
+- **Input**: Video files from database (all supported formats)
+- **Output**: `temp/audio/{videoId}.wav` (16kHz mono WAV)
+- **Configuration**:
+  ```typescript
+  ffmpeg(videoPath)
+    .audioFrequency(16000)
+    .audioChannels(1)
+    .audioCodec('pcm_s16le')
+    .format('wav')
+  ```
+- **Cleanup**: Auto-delete temp files after successful transcription
+
+**4. Progress Tracking System**
+- **IPC Events**: Send `transcription-progress` events to renderer
+- **Progress Stages**:
+  - Audio Extraction: 0-30%
+  - Whisper Transcription: 30-90% 
+  - Database Storage: 90-100%
+- **Data Format**: `{ videoId, stage, progress, message }`
+- **UI Integration**: Update existing transcription status indicators
+
+**5. Queue Management**
+- **Implementation**: Simple array-based in-memory queue
+- **Concurrency**: Process one video at a time initially
+- **Status Flow**: 'queued' → 'processing' → 'completed'/'failed'
+- **Queue Operations**: add, remove, getStatus, clearCompleted
+
+**6. Error Handling Strategy**
+- **Error Types**:
+  - `AudioExtractionError`: FFmpeg failures, file corruption
+  - `TranscriptionError`: Whisper model issues, memory problems
+  - `DatabaseError`: Storage failures
+- **Recovery**: Set video status to 'failed' with detailed error message
+- **Partial Failures**: Clean up temp files even on failure
+- **User Feedback**: Display specific error messages in UI
+
+**7. File Management**
+- **Temp Directory**: `{app-data}/temp/audio/`
+- **Naming Convention**: `{videoId}.wav`
+- **Size Limits**: Warn for videos >2GB, fail gracefully for >4GB
+- **Disk Space**: Check available space before extraction
+- **Cleanup Strategy**: Delete temp files after completion/failure
+
+#### 🔧 Files to Create/Modify
+
+**New Files**:
+- `src/main/transcription/audio-extractor.ts` - FFmpeg wrapper
+- `src/main/transcription/whisper-transcriber.ts` - Whisper integration  
+- `src/main/transcription/transcription-queue.ts` - Queue management
+- `src/main/transcription/index.ts` - Main transcription orchestrator
+
+**Modified Files**:
+- `src/main/ipc/handlers.ts` - Replace TRANSCRIBE_VIDEO handler (lines 84-130)
+- `package.json` - Add new dependencies
+- `src/renderer/App.tsx` - Add progress event listeners
+
+#### ✅ Success Criteria
+- [ ] Audio extraction from video files using FFmpeg
+- [ ] Local Whisper transcription with timestamped segments
+- [ ] Progress updates visible in UI during transcription
+- [ ] Transcript segments stored in existing database schema
+- [ ] Error handling with specific error messages
+- [ ] Automatic cleanup of temporary files
+- [ ] Queue system for multiple video transcription
+- [ ] Performance: >1x real-time transcription speed
+
+**Expected Implementation Time**: 4-6 hours for experienced developer
 
 ### 🔄 Phase 4: Search Implementation (READY FOR TRANSCRIPTS)
-**Goals**: Enhance search functionality
-- [✅] Full-text search using SQLite FTS5 (implemented and functional)
-- [✅] Search result grouping by video (implemented and functional)
-- [✅] Search history functionality (implemented and persistent)
-- [ ] Search result ranking and relevance improvement
-- [ ] Highlight search terms in results
-- [ ] Advanced search options (time range, specific videos)
-
-**Current Status**: Search UI and infrastructure is fully functional and ready to search real transcript data once transcription is implemented
-
-**Deliverables**:
-- ✅ Search UI implemented and functional
-- ✅ Search infrastructure ready for real transcript data
-- ✅ Search history tracking (persistent)
-- ❌ Enhanced search features (not implemented)
+**Status**: Infrastructure complete, waiting for real transcript data from Phase 3
 
 ### 📋 Phase 5: Video Player Integration (PLANNED)
-**Goals**: Implement video playback with timestamp navigation
-- [ ] Integrate video player component
-- [ ] Implement seek-to-timestamp functionality
-- [ ] Create transcript viewer with clickable timestamps
-- [ ] Synchronize video playback with transcript
-- [ ] Handle multiple video formats
-
-### 📋 Phase 6: UI/UX Polish (PLANNED)
-**Goals**: Improve user interface and experience
-- [ ] Responsive design implementation
-- [ ] Dark/light theme support
-- [ ] Keyboard shortcuts
-- [ ] Settings panel (transcription quality, storage location)
-- [ ] Error handling and user feedback
-- [ ] Loading states and animations
-
+### 📋 Phase 6: UI/UX Polish (PLANNED)  
 ### 📋 Phase 7: Performance & Optimization (PLANNED)
-**Goals**: Optimize performance and add advanced features
-- [ ] Database indexing optimization
-- [ ] Lazy loading for large video collections
-- [ ] Background transcription processing
-- [ ] Memory usage optimization
-- [ ] Semantic search implementation (optional)
-- [ ] Export/import functionality
-
 ### 📋 Phase 8: Testing & Distribution (PLANNED)
-**Goals**: Prepare for distribution
-- [ ] Unit tests for core functionality
-- [ ] Integration tests
-- [ ] Cross-platform testing (Windows, macOS, Linux)
-- [ ] Build automation and packaging
-- [ ] Documentation and user guide
-- [ ] Performance benchmarking
 
 ## Next Steps (Critical Priorities)
 
@@ -282,102 +256,40 @@ CREATE TABLE search_history (
 
 ## Technical Considerations
 
-### Build Architecture (Critical)
+### Critical Architecture Requirements
 - **Main Process**: Always use TypeScript compiler, never webpack
-- **Renderer Process**: Use webpack for proper web bundling
-- **Preload Scripts**: Use TypeScript compiler with proper module resolution
+- **Renderer Process**: Use webpack for proper web bundling  
 - **Native Modules**: Ensure they remain unbundled and properly linked
+- **Worker Threads**: Use for transcription to avoid blocking UI
+- **Memory Management**: Monitor memory usage during transcription
 
-### Database Issues (Critical)
-- **Current Problem**: better-sqlite3 likely failing to initialize
-- **Investigation Needed**: Check native module compilation, platform compatibility
-- **Fallback Strategy**: Memory-only mode works but data is not persistent
-- **Solution Required**: Proper database initialization and error handling
+### Performance Targets
+- Application starts in <3 seconds ✅ 
+- Video scanning: <1 second per 100 files ✅
+- Transcription speed: >1x real-time ❌ (Phase 3)
+- Memory usage: <500MB for 1000 videos ❌ (To be tested)
+- Search response time: <200ms ✅
 
-### Performance
-- Use worker threads for transcription to avoid blocking UI
-- Implement database connection pooling
-- Cache frequently accessed data
-- Optimize video file scanning with async operations
-
-### Security
+### Security & Validation
 - Validate all file paths to prevent directory traversal
 - Sanitize database inputs
 - Handle malformed video files gracefully
-
-### Cross-Platform Compatibility
-- Use path.join() for file paths
-- Test on Windows, macOS, and Linux
-- Handle platform-specific video codecs
+- Check available disk space before operations
 
 ## Dependencies (Current)
 ```json
 {
   "dependencies": {
-    "better-sqlite3": "^12.2.0",
-    "fluent-ffmpeg": "^2.1.2",
+    "better-sqlite3": "^9.6.0",
+    "fluent-ffmpeg": "^2.1.2", 
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
-  },
-  "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/electron": "^1.6.12",
-    "@types/fluent-ffmpeg": "^2.1.27",
-    "@types/node": "^20.0.0",
-    "@types/react": "^18.0.0",
-    "@types/react-dom": "^18.0.0",
-    "concurrently": "^8.0.0",
-    "css-loader": "^6.0.0",
-    "electron": "^28.0.0",
-    "electron-builder": "^24.0.0",
-    "html-webpack-plugin": "^5.0.0",
-    "rimraf": "^5.0.0",
-    "style-loader": "^3.0.0",
-    "ts-loader": "^9.0.0",
-    "typescript": "^5.0.0",
-    "wait-on": "^7.0.0",
-    "webpack": "^5.0.0",
-    "webpack-cli": "^5.0.0"
   }
 }
 ```
 
-## Success Metrics
-- Application starts in <3 seconds ✅ (Currently achieved)
-- Video scanning completes in <1 second per 100 files ✅ (Currently achieved)
-- Database initialization succeeds ✅ (Now working with electron-rebuild)
-- Videos persist between sessions ✅ (Now working)
-- Transcription processes at >1x real-time speed ❌ (Not implemented)
-- Search returns actual results ❌ (Ready for transcript data)
-- Memory usage stays <500MB for 1000 videos ❌ (To be tested after transcription)
-- Cross-platform compatibility verified ❌ (To be tested)
-
-## Risk Mitigation
-- **Build Architecture**: ✅ Resolved - Proper TypeScript/Webpack hybrid approach implemented
-- **Database Issues**: ✅ Resolved - Database initialization working with electron-rebuild integration
-- **Mock Transcription**: ❌ **CRITICAL RISK** - Core functionality not implemented, app appears functional but isn't
-- **Whisper Integration**: Have fallback to cloud API if local fails
-- **FFmpeg Issues**: Include pre-built binaries for all platforms
-- **Database Performance**: ✅ Proper indexing implemented and functional
-- **Large Files**: Set reasonable file size limits and warnings
-- **Cross-Platform**: Test early and often on all target platforms
-
-## Lessons Learned
-1. **Electron Build Architecture**: Never bundle the main process with webpack - use TypeScript compiler to preserve Node.js module structure
-2. **Database Reliability**: Need robust error handling and fallback strategies for native modules
-3. **Mock vs Real Implementation**: Clear distinction needed between working UI and functional backend
-4. **Phase Assessment**: Regular codebase analysis needed to ensure accurate progress tracking
-5. **Critical Dependencies**: Native modules like better-sqlite3 require careful testing and error handling
-
 ## Assessment
-The application now has **solid foundational infrastructure** with **one critical missing piece**:
-
-**✅ Resolved Issues:**
-1. **Database Functionality**: SQLite now initializes properly and persists data
-2. **Video Management**: Videos are stored persistently and survive app restarts
-3. **Search Infrastructure**: Full-text search is implemented and ready for transcript data
-
-**❌ Remaining Critical Issue:**
-1. **Mock Transcription**: The primary feature (video transcription) is completely mocked with hardcoded data
-
-**Current Status**: The application has a **fully functional backend infrastructure** ready for real transcription data. Once transcription is implemented, the app will be feature-complete for its core functionality.
+**Infrastructure Status**: ✅ Solid foundation with functional database, UI, and search
+**Critical Blocker**: ❌ Mock transcription prevents core functionality  
+**Next Priority**: Implement Phase 3 transcription pipeline
+**Timeline**: Once Phase 3 is complete, app will be feature-complete for core functionality
