@@ -221,6 +221,35 @@ export class VideoDatabase {
     }
   }
 
+  getVideoById(videoId: number): VideoFile | null {
+    if (this.isAvailable) {
+      const stmt = this.db.prepare('SELECT * FROM videos WHERE id = ?');
+      const row = stmt.get(videoId) as any;
+      return row ? this.mapRowToVideo(row) : null;
+    } else {
+      // Memory-based implementation
+      return this.memoryVideos.find(v => v.id === videoId) || null;
+    }
+  }
+
+  updateVideoDuration(videoId: number, duration: number): void {
+    if (this.isAvailable) {
+      const stmt = this.db.prepare(`
+        UPDATE videos 
+        SET duration = ?, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = ?
+      `);
+      stmt.run(duration, videoId);
+    } else {
+      // Memory-based implementation
+      const video = this.memoryVideos.find(v => v.id === videoId);
+      if (video) {
+        video.duration = duration;
+        video.updatedAt = new Date().toISOString();
+      }
+    }
+  }
+
   // Transcript operations
   insertTranscriptSegments(videoId: number, segments: Omit<TranscriptSegment, 'id' | 'videoId'>[]): void {
     if (this.isAvailable) {
