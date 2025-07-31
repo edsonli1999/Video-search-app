@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { VideoFile, SearchResult } from '../shared/types';
 import './App.css';
 
-const App: React.FC = () => {
-  const [videos, setVideos] = useState<VideoFile[]>([]);
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+const App = () => {
+  const [videos, setVideos] = useState([]);
+  const [selectedFolder, setSelectedFolder] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [currentVideo, setCurrentVideo] = useState<VideoFile | null>(null);
+  const [currentVideo, setCurrentVideo] = useState(null);
 
   console.log('🔍 App render - searchQuery:', searchQuery);
   console.log('🔍 App render - searchResults:', searchResults);
@@ -56,7 +55,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSearch = async (query: string) => {
+  const handleSearch = async (query) => {
     console.log('🔍 handleSearch called with query:', query);
     
     if (!query.trim()) {
@@ -87,7 +86,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleTranscribeVideo = async (video: VideoFile) => {
+  const handleTranscribeVideo = async (video) => {
     if (!video.id) return;
 
     try {
@@ -111,14 +110,14 @@ const App: React.FC = () => {
     }
   };
 
-  const formatFileSize = (bytes: number): string => {
+  const formatFileSize = (bytes) => {
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     if (bytes === 0) return '0 Bytes';
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
   };
 
-  const formatTime = (seconds: number): string => {
+  const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -230,4 +229,4 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
+export default App; 

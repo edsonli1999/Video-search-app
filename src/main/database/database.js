@@ -1,13 +1,14 @@
-import * as path from 'path';
-import * as fs from 'fs';
-import { app } from 'electron';
-import { VideoFile, TranscriptSegment, SearchResult } from '../../shared/types';
+const path = require('path');
+const fs = require('fs');
+const { app } = require('electron');
 
-export class VideoDatabase {
-  private db: any = null;
-  private isAvailable: boolean = false;
-
+class VideoDatabase {
   constructor() {
+    this.db = null;
+    this.isAvailable = false;
+    this.memoryVideos = [];
+    this.memoryTranscripts = new Map();
+
     console.log('🔧 DB: Starting database initialization...');
 
     try {
@@ -115,15 +116,12 @@ export class VideoDatabase {
     }
   }
 
-  private memoryVideos: VideoFile[] = [];
-  private memoryTranscripts: Map<number, TranscriptSegment[]> = new Map();
-
-  private initializeMemoryStorage(): void {
+  initializeMemoryStorage() {
     this.memoryVideos = [];
     this.memoryTranscripts = new Map();
   }
 
-  private initializeDatabase(): void {
+  initializeDatabase() {
     // Use the correct path to schema.sql - it should be in the same directory as this file
     const schemaPath = path.join(__dirname, 'schema.sql');
     const schema = fs.readFileSync(schemaPath, 'utf-8');
@@ -131,7 +129,7 @@ export class VideoDatabase {
   }
 
   // Video operations
-  insertVideo(video: Omit<VideoFile, 'id'>): number {
+  insertVideo(video) {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
         INSERT INTO videos (file_path, file_name, file_size, duration, transcription_status)
@@ -146,11 +144,11 @@ export class VideoDatabase {
         video.transcriptionStatus
       );
 
-      return result.lastInsertRowid as number;
+      return result.lastInsertRowid;
     } else {
       // Memory-based implementation
       const id = this.memoryVideos.length + 1;
-      const newVideo: VideoFile = {
+      const newVideo = {
         ...video,
         id,
         createdAt: new Date().toISOString(),
@@ -161,13 +159,13 @@ export class VideoDatabase {
     }
   }
 
-  getVideoByPath(filePath: string): VideoFile | null {
+  getVideoByPath(filePath) {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
         SELECT * FROM videos WHERE file_path = ?
       `);
 
-      const row = stmt.get(filePath) as any;
+      const row = stmt.get(filePath);
       return row ? this.mapRowToVideo(row) : null;
     } else {
       // Memory-based implementation
@@ -175,13 +173,13 @@ export class VideoDatabase {
     }
   }
 
-  getAllVideos(): VideoFile[] {
+  getAllVideos() {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
         SELECT * FROM videos ORDER BY created_at DESC
       `);
 
-      const rows = stmt.all() as any[];
+      const rows = stmt.all();
       return rows.map(row => this.mapRowToVideo(row));
     } else {
       // Memory-based implementation
@@ -189,7 +187,7 @@ export class VideoDatabase {
     }
   }
 
-  updateVideoTranscriptionStatus(videoId: number, status: VideoFile['transcriptionStatus']): void {
+  updateVideoTranscriptionStatus(videoId, status) {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
         UPDATE videos SET transcription_status = ?, updated_at = CURRENT_TIMESTAMP
@@ -207,7 +205,7 @@ export class VideoDatabase {
     }
   }
 
-  deleteVideo(videoId: number): void {
+  deleteVideo(videoId) {
     if (this.isAvailable) {
       const stmt = this.db.prepare('DELETE FROM videos WHERE id = ?');
       stmt.run(videoId);
@@ -222,14 +220,14 @@ export class VideoDatabase {
   }
 
   // Transcript operations
-  insertTranscriptSegments(videoId: number, segments: Omit<TranscriptSegment, 'id' | 'videoId'>[]): void {
+  insertTranscriptSegments(videoId, segments) {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
         INSERT INTO transcript_segments (video_id, start_time, end_time, text, confidence)
         VALUES (?, ?, ?, ?, ?)
       `);
 
-      const transaction = this.db.transaction((segments: Omit<TranscriptSegment, 'id' | 'videoId'>[]) => {
+      const transaction = this.db.transaction((segments) => {
         for (const segment of segments) {
           stmt.run(videoId, segment.startTime, segment.endTime, segment.text, segment.confidence || null);
         }
@@ -238,7 +236,7 @@ export class VideoDatabase {
       transaction(segments);
     } else {
       // Memory-based implementation
-      const transcriptSegments: TranscriptSegment[] = segments.map((segment, index) => ({
+      const transcriptSegments = segments.map((segment, index) => ({
         id: Date.now() + index,
         videoId,
         ...segment
@@ -247,7 +245,7 @@ export class VideoDatabase {
     }
   }
 
-  getTranscriptSegments(videoId: number): TranscriptSegment[] {
+  getTranscriptSegments(videoId) {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
         SELECT * FROM transcript_segments 
@@ -255,7 +253,7 @@ export class VideoDatabase {
         ORDER BY start_time ASC
       `);
 
-      const rows = stmt.all(videoId) as any[];
+      const rows = stmt.all(videoId);
       return rows.map(row => this.mapRowToTranscriptSegment(row));
     } else {
       // Memory-based implementation
@@ -264,7 +262,7 @@ export class VideoDatabase {
   }
 
   // Search operations
-  searchTranscripts(query: string, limit: number = 50): SearchResult[] {
+  searchTranscripts(query, limit = 50) {
     console.log('🔍 DB: searchTranscripts called with query:', query, 'limit:', limit);
     console.log('🔍 DB: Database available:', this.isAvailable);
 
@@ -293,12 +291,12 @@ export class VideoDatabase {
       `);
 
       console.log('🔍 DB: Executing database query');
-      const rows = stmt.all(query, limit) as any[];
+      const rows = stmt.all(query, limit);
       console.log('🔍 DB: Raw database rows:', rows);
       console.log('🔍 DB: Number of raw rows:', rows.length);
 
       // Group results by video
-      const videoMap = new Map<number, SearchResult>();
+      const videoMap = new Map();
 
       for (const row of rows) {
         const videoId = row.video_id;
@@ -313,7 +311,7 @@ export class VideoDatabase {
           });
         }
 
-        const searchResult = videoMap.get(videoId)!;
+        const searchResult = videoMap.get(videoId);
         searchResult.segments.push({
           id: row.id,
           videoId,
@@ -335,12 +333,12 @@ export class VideoDatabase {
       console.log('🔍 DB: Memory transcripts count:', this.memoryTranscripts.size);
 
       // Memory-based implementation - simple text search
-      const results: SearchResult[] = [];
+      const results = [];
       const queryLower = query.toLowerCase();
 
       for (const video of this.memoryVideos) {
         console.log('🔍 DB: Checking video:', video.fileName, 'ID:', video.id);
-        const segments = this.memoryTranscripts.get(video.id!) || [];
+        const segments = this.memoryTranscripts.get(video.id) || [];
         console.log('🔍 DB: Video segments count:', segments.length);
 
         if (segments.length > 0) {
@@ -355,7 +353,7 @@ export class VideoDatabase {
 
         if (matchingSegments.length > 0) {
           const result = {
-            videoId: video.id!,
+            videoId: video.id,
             videoPath: video.filePath,
             videoName: video.fileName,
             segments: matchingSegments,
@@ -374,7 +372,7 @@ export class VideoDatabase {
     }
   }
 
-  private saveSearchHistory(query: string): void {
+  saveSearchHistory(query) {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
         INSERT INTO search_history (query) VALUES (?)
@@ -384,7 +382,7 @@ export class VideoDatabase {
     // Memory mode doesn't save search history
   }
 
-  getSearchHistory(limit: number = 10): string[] {
+  getSearchHistory(limit = 10) {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
         SELECT DISTINCT query FROM search_history 
@@ -392,7 +390,7 @@ export class VideoDatabase {
         LIMIT ?
       `);
 
-      const rows = stmt.all(limit) as any[];
+      const rows = stmt.all(limit);
       return rows.map(row => row.query);
     } else {
       // Memory mode doesn't have search history
@@ -401,7 +399,7 @@ export class VideoDatabase {
   }
 
   // Helper methods
-  private mapRowToVideo(row: any): VideoFile {
+  mapRowToVideo(row) {
     return {
       id: row.id,
       filePath: row.file_path,
@@ -414,7 +412,7 @@ export class VideoDatabase {
     };
   }
 
-  private mapRowToTranscriptSegment(row: any): TranscriptSegment {
+  mapRowToTranscriptSegment(row) {
     return {
       id: row.id,
       videoId: row.video_id,
@@ -425,7 +423,7 @@ export class VideoDatabase {
     };
   }
 
-  close(): void {
+  close() {
     if (this.isAvailable && this.db) {
       this.db.close();
     }
@@ -433,18 +431,24 @@ export class VideoDatabase {
 }
 
 // Singleton instance
-let dbInstance: VideoDatabase | null = null;
+let dbInstance = null;
 
-export function getDatabase(): VideoDatabase {
+function getDatabase() {
   if (!dbInstance) {
     dbInstance = new VideoDatabase();
   }
   return dbInstance;
 }
 
-export function closeDatabase(): void {
+function closeDatabase() {
   if (dbInstance) {
     dbInstance.close();
     dbInstance = null;
   }
 }
+
+module.exports = {
+  VideoDatabase,
+  getDatabase,
+  closeDatabase
+}; 

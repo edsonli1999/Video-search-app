@@ -1,12 +1,12 @@
-import { ipcMain, dialog } from 'electron';
-import { IPC_CHANNELS } from '../../shared/types';
-import { getDatabase } from '../database/database';
-import { VideoScanner } from '../video/video-scanner';
+const { ipcMain, dialog } = require('electron');
+const { IPC_CHANNELS } = require('../../shared/types.js');
+const { getDatabase } = require('../database/database.js');
+const { VideoScanner } = require('../video/video-scanner.js');
 
 const db = getDatabase();
 const videoScanner = new VideoScanner();
 
-export function setupIpcHandlers(): void {
+function setupIpcHandlers() {
   // Handle folder selection
   ipcMain.handle(IPC_CHANNELS.SELECT_FOLDER, async () => {
     try {
@@ -27,7 +27,7 @@ export function setupIpcHandlers(): void {
   });
 
   // Handle video scanning
-  ipcMain.handle(IPC_CHANNELS.SCAN_VIDEOS, async (event, folderPath: string) => {
+  ipcMain.handle(IPC_CHANNELS.SCAN_VIDEOS, async (event, folderPath) => {
     try {
       const videos = await videoScanner.scanFolder(folderPath);
       return videos;
@@ -48,7 +48,7 @@ export function setupIpcHandlers(): void {
   });
 
   // Handle search
-  ipcMain.handle(IPC_CHANNELS.SEARCH_VIDEOS, async (event, query: string) => {
+  ipcMain.handle(IPC_CHANNELS.SEARCH_VIDEOS, async (event, query) => {
     console.log('🔍 IPC: SEARCH_VIDEOS handler called with query:', query);
     
     try {
@@ -74,7 +74,7 @@ export function setupIpcHandlers(): void {
   });
 
   // Handle getting transcript for a video
-  ipcMain.handle(IPC_CHANNELS.GET_TRANSCRIPT, async (event, videoId: number) => {
+  ipcMain.handle(IPC_CHANNELS.GET_TRANSCRIPT, async (event, videoId) => {
     try {
       return db.getTranscriptSegments(videoId);
     } catch (error) {
@@ -84,7 +84,7 @@ export function setupIpcHandlers(): void {
   });
 
   // Handle transcription (placeholder for MVP)
-  ipcMain.handle(IPC_CHANNELS.TRANSCRIBE_VIDEO, async (event, videoId: number) => {
+  ipcMain.handle(IPC_CHANNELS.TRANSCRIBE_VIDEO, async (event, videoId) => {
     try {
       // For MVP, we'll just mark as completed with dummy data
       // In full implementation, this would trigger actual transcription
@@ -128,3 +128,7 @@ export function setupIpcHandlers(): void {
     }
   });
 }
+
+module.exports = {
+  setupIpcHandlers
+}; 

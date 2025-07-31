@@ -1,11 +1,11 @@
-import { app, BrowserWindow } from 'electron';
-import * as path from 'path';
-import { setupIpcHandlers } from './ipc/handlers';
-import { closeDatabase } from './database/database';
+const { app, BrowserWindow } = require('electron');
+const path = require('path');
+const { setupIpcHandlers } = require('./ipc/handlers');
+const { closeDatabase } = require('./database/database');
 
-let mainWindow: BrowserWindow | null = null;
+let mainWindow = null;
 
-function createWindow(): void {
+function createWindow() {
   // Create the browser window
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -29,7 +29,9 @@ function createWindow(): void {
 
   // Show window when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
+    if (mainWindow) {
+      mainWindow.show();
+    }
   });
 
   // Handle window closed
@@ -62,14 +64,11 @@ app.on('window-all-closed', () => {
   }
 });
 
-// Handle app termination
+// Handle the quit event
 app.on('before-quit', () => {
+  console.log('Application is quitting...');
   closeDatabase();
 });
 
-// Security: Prevent new window creation
-app.on('web-contents-created', (event, contents) => {
-  contents.setWindowOpenHandler(() => {
-    return { action: 'deny' };
-  });
-});
+// In this file you can include the rest of your app's specific main process
+// code. You can also put them in separate files and require them here. 

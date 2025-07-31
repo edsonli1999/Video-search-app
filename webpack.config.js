@@ -2,16 +2,19 @@ const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 
 module.exports = {
-  entry: './src/renderer/index.tsx',
+  entry: './src/renderer/index.jsx',
   target: 'electron-renderer',
   module: {
     rules: [
       {
-        test: /\.tsx?$/,
+        test: /\.jsx?$/,
         use: [{
-          loader: 'ts-loader',
+          loader: 'babel-loader',
           options: {
-            configFile: 'tsconfig.renderer.json'
+            presets: [
+              ['@babel/preset-env', { targets: { electron: '28' } }],
+              ['@babel/preset-react', { runtime: 'automatic' }]
+            ]
           }
         }],
         exclude: /node_modules/,
@@ -23,7 +26,7 @@ module.exports = {
     ],
   },
   resolve: {
-    extensions: ['.tsx', '.ts', '.js'],
+    extensions: ['.jsx', '.js'],
   },
   output: {
     filename: 'bundle.js',

@@ -1,13 +1,15 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import { VideoFile, SUPPORTED_VIDEO_FORMATS } from '../../shared/types';
-import { getDatabase } from '../database/database';
+const fs = require('fs');
+const path = require('path');
+const { SUPPORTED_VIDEO_FORMATS } = require('../../shared/types.js');
+const { getDatabase } = require('../database/database.js');
 
-export class VideoScanner {
-  private db = getDatabase();
+class VideoScanner {
+  constructor() {
+    this.db = getDatabase();
+  }
 
-  async scanFolder(folderPath: string): Promise<VideoFile[]> {
-    const videoFiles: VideoFile[] = [];
+  async scanFolder(folderPath) {
+    const videoFiles = [];
     
     try {
       await this.scanDirectory(folderPath, videoFiles);
@@ -31,7 +33,7 @@ export class VideoScanner {
     }
   }
 
-  private async scanDirectory(dirPath: string, videoFiles: VideoFile[]): Promise<void> {
+  async scanDirectory(dirPath, videoFiles) {
     try {
       const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
       
@@ -44,11 +46,11 @@ export class VideoScanner {
         } else if (entry.isFile()) {
           const ext = path.extname(entry.name).toLowerCase();
           
-          if (SUPPORTED_VIDEO_FORMATS.includes(ext as any)) {
+          if (SUPPORTED_VIDEO_FORMATS.includes(ext)) {
             try {
               const stats = await fs.promises.stat(fullPath);
               
-              const videoFile: VideoFile = {
+              const videoFile = {
                 filePath: fullPath,
                 fileName: entry.name,
                 fileSize: stats.size,
@@ -68,18 +70,18 @@ export class VideoScanner {
     }
   }
 
-  async getVideoMetadata(filePath: string): Promise<{ duration?: number }> {
+  async getVideoMetadata(filePath) {
     // For MVP, we'll return empty metadata
     // In a full implementation, this would use FFmpeg to get video duration
     return {};
   }
 
-  isVideoFile(filePath: string): boolean {
+  isVideoFile(filePath) {
     const ext = path.extname(filePath).toLowerCase();
-    return SUPPORTED_VIDEO_FORMATS.includes(ext as any);
+    return SUPPORTED_VIDEO_FORMATS.includes(ext);
   }
 
-  async validateVideoFile(filePath: string): Promise<boolean> {
+  async validateVideoFile(filePath) {
     try {
       const stats = await fs.promises.stat(filePath);
       return stats.isFile() && this.isVideoFile(filePath);
@@ -88,3 +90,7 @@ export class VideoScanner {
     }
   }
 }
+
+module.exports = {
+  VideoScanner
+}; 
