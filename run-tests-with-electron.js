@@ -10,8 +10,7 @@ const jestCliPath = path.join(__dirname, 'node_modules', 'jest', 'bin', 'jest.js
 console.log('Running Jest with Electron Node.js...');
 console.log('Electron path:', electronPath);
 console.log('Jest CLI path:', jestCliPath);
-
-const child = spawn(electronPath, [jestCliPath], {
+const child = spawn(electronPath, [jestCliPath, ...process.argv.slice(2)], {
   stdio: 'inherit',
   env: { 
     ...process.env, 
