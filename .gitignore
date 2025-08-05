@@ -37,6 +37,9 @@ Thumbs.db
 logs
 *.log
 
+# Test results
+jest_test_results/
+
 # Runtime data
 pids
 *.pid
@@ -95,6 +98,7 @@ node_modules/
 
 # Logs
 *.log
+jest_test_results/
 
 code_base_preedit.zip
 code_base_raven_postedit.zip
