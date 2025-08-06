@@ -5,6 +5,12 @@ const fs = require('fs');
 
 const electronPath = require('electron');
 
+// Function to strip ANSI color codes from text
+function stripAnsiCodes(text) {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
 // Setup output directory structure
 const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
 const timestamp = new Date().toISOString().replace(/[:.]/g, '-'); // Safe filename timestamp
@@ -43,15 +49,15 @@ logStream.write('='.repeat(80) + '\n\n');
 // Capture and display stdout
 child.stdout.on('data', (data) => {
   const output = data.toString();
-  process.stdout.write(output); // Display to console
-  logStream.write(output); // Write to file
+  process.stdout.write(output); // Display to console (with colors)
+  logStream.write(stripAnsiCodes(output)); // Write to file (without colors)
 });
 
 // Capture and display stderr
 child.stderr.on('data', (data) => {
   const output = data.toString();
-  process.stderr.write(output); // Display to console
-  logStream.write(output); // Write to file
+  process.stderr.write(output); // Display to console (with colors)
+  logStream.write(stripAnsiCodes(output)); // Write to file (without colors)
 });
 
 child.on('exit', (code) => {
