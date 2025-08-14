@@ -31,7 +31,8 @@ export class TranscriptionOrchestrator extends EventEmitter {
     this.database = database;
     this.audioExtractor = new AudioExtractor(tempDir);
     this.whisperTranscriber = new WhisperTranscriber();
-    this.queue = new TranscriptionQueue();
+    // Pass the processing callback to the queue
+    this.queue = new TranscriptionQueue((job) => this.processTranscriptionJob(job));
     
     this.setupEventListeners();
   }

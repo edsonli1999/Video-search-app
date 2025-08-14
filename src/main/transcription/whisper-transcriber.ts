@@ -1,5 +1,3 @@
-// Remove the static import at the top
-// import { pipeline, env } from '@xenova/transformers';
 import * as fs from 'fs';
 import { EventEmitter } from 'events';
 
@@ -39,25 +37,36 @@ export class WhisperTranscriber extends EventEmitter {
   private fallbackModel = 'Xenova/whisper-tiny';
   private pipeline: Pipeline | null = null;
   private env: Env | null = null;
+  private transformersModule: any = null;
 
   constructor() {
     super();
-    this.initializeTransformers();
+    // Don't initialize in constructor to avoid immediate loading
   }
 
   /**
    * Initialize transformers module dynamically
    */
   private async initializeTransformers(): Promise<void> {
+    if (this.transformersModule) {
+      return; // Already initialized
+    }
+
     try {
-      // Dynamically import the transformers module
-      const transformersModule = await import('@xenova/transformers');
-      this.pipeline = transformersModule.pipeline;
-      this.env = transformersModule.env;
+      console.log('🔄 Loading transformers module...');
+      
+      // Use Function constructor to ensure dynamic import is not transformed
+      const dynamicImport = new Function('specifier', 'return import(specifier)');
+      this.transformersModule = await dynamicImport('@xenova/transformers');
+      
+      this.pipeline = this.transformersModule.pipeline;
+      this.env = this.transformersModule.env;
       
       // Configure transformers to use local cache
-      this.env.cacheDir = './models';
-      this.env.allowLocalModels = true;
+      if (this.env) {
+        this.env.cacheDir = './models';
+        this.env.allowLocalModels = true;
+      }
       
       console.log('✅ Transformers module loaded successfully');
     } catch (error) {
@@ -70,7 +79,7 @@ export class WhisperTranscriber extends EventEmitter {
    * Ensure transformers is initialized
    */
   private async ensureInitialized(): Promise<void> {
-    if (!this.pipeline || !this.env) {
+    if (!this.transformersModule) {
       await this.initializeTransformers();
     }
   }
@@ -86,13 +95,17 @@ export class WhisperTranscriber extends EventEmitter {
     // Ensure transformers is initialized
     await this.ensureInitialized();
 
+    if (!this.pipeline) {
+      throw new Error('Pipeline not initialized');
+    }
+
     const modelToLoad = modelName || this.defaultModel;
     
     try {
       console.log(`🤖 Loading Whisper model: ${modelToLoad}`);
       this.emit('progress', { stage: 'loading_model', progress: 0, message: `Loading model: ${modelToLoad}` });
       
-      this.model = await this.pipeline!('automatic-speech-recognition', modelToLoad, {
+      this.model = await this.pipeline('automatic-speech-recognition', modelToLoad, {
         progress_callback: (progress: any) => {
           this.emit('progress', { 
             stage: 'loading_model', 

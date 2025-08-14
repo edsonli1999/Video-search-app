@@ -27,9 +27,11 @@ export class TranscriptionQueue extends EventEmitter {
   private processing: TranscriptionJob | null = null;
   private isProcessing = false;
   private jobCounter = 0;
+  private processJobCallback?: (job: TranscriptionJob) => Promise<void>;
 
-  constructor() {
+  constructor(processJobCallback?: (job: TranscriptionJob) => Promise<void>) {
     super();
+    this.processJobCallback = processJobCallback;
   }
 
   /**
@@ -181,11 +183,13 @@ export class TranscriptionQueue extends EventEmitter {
         stage: 'starting'
       });
 
-      // The actual transcription will be handled by the transcription orchestrator
-      // This queue just manages the job lifecycle
+      // Call the actual processing function
+      if (this.processJobCallback) {
+        await this.processJobCallback(job);
+      } else {
+        throw new Error('No job processing callback provided');
+      }
       
-      // For now, we'll just mark it as completed
-      // In the real implementation, this would call the transcription orchestrator
       job.status = 'completed';
       job.completedAt = new Date();
       job.progress = 100;
