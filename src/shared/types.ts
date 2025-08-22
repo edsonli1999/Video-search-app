@@ -44,6 +44,8 @@ export const IPC_CHANNELS = {
   GET_VIDEOS: 'get-videos',
   TRANSCRIBE_VIDEO: 'transcribe-video',
   GET_TRANSCRIPT: 'get-transcript',
+  TRANSCRIPTION_COMPLETED: 'transcription-completed',
+  TRANSCRIPTION_FAILED: 'transcription-failed',
 } as const;
 
 // Supported video formats

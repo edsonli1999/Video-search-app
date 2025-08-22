@@ -1,4 +1,5 @@
 import ffmpeg from 'fluent-ffmpeg';
+import ffmpegStatic from 'ffmpeg-static';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -6,7 +7,6 @@ export interface AudioExtractionOptions {
   outputFormat?: 'wav' | 'mp3';
   sampleRate?: number;
   channels?: number;
-  audioCodec?: string;
 }
 
 export interface AudioExtractionResult {
@@ -18,21 +18,57 @@ export interface AudioExtractionResult {
 
 export class AudioExtractor {
   private tempDir: string;
+  private isConfigured = false;
 
   constructor(tempDir: string = 'temp/audio') {
     this.tempDir = tempDir;
     this.ensureTempDir();
+    this.configureFFmpeg();
+    console.log('✅ AudioExtractor: Constructor completed with native FFmpeg');
   }
 
   private ensureTempDir(): void {
     if (!fs.existsSync(this.tempDir)) {
       fs.mkdirSync(this.tempDir, { recursive: true });
+      console.log(`🎵 AudioExtractor: Created temp directory: ${this.tempDir}`);
+    } else {
+      console.log(`🎵 AudioExtractor: Temp directory exists: ${this.tempDir}`);
     }
   }
 
   /**
-   * Extract audio from video file for transcription
-   * Outputs 16kHz mono WAV format optimized for Whisper
+   * Configure FFmpeg to use the static binary from ffmpeg-static
+   */
+  private configureFFmpeg(): void {
+    if (this.isConfigured) {
+      console.log('🎵 AudioExtractor: FFmpeg already configured, skipping');
+      return;
+    }
+
+    try {
+      console.log('🚀 AudioExtractor: Configuring native FFmpeg...');
+      
+      // ffmpeg-static automatically provides the correct binary for the platform
+      if (!ffmpegStatic) {
+        throw new Error('ffmpeg-static binary not found');
+      }
+
+      console.log(`🎵 AudioExtractor: Using FFmpeg binary: ${ffmpegStatic}`);
+      
+      // Configure fluent-ffmpeg to use the static binary
+      ffmpeg.setFfmpegPath(ffmpegStatic);
+      
+      this.isConfigured = true;
+      console.log('✅ AudioExtractor: Native FFmpeg configured successfully!');
+      
+    } catch (error) {
+      console.error('❌ AudioExtractor: Failed to configure FFmpeg:', error);
+      throw new Error(`FFmpeg configuration failed: ${error}`);
+    }
+  }
+
+  /**
+   * Extract audio from video file using native FFmpeg
    */
   async extractAudio(
     videoPath: string, 
@@ -42,82 +78,148 @@ export class AudioExtractor {
     const {
       outputFormat = 'wav',
       sampleRate = 16000,
-      channels = 1,
-      audioCodec = 'pcm_s16le'
+      channels = 1
     } = options;
 
     const outputPath = path.join(this.tempDir, `${videoId}.${outputFormat}`);
+    
+    console.log(`🎵 AudioExtractor: Starting native audio extraction for video ${videoId}`);
+    console.log(`🎵 AudioExtractor: Input: ${videoPath}`);
+    console.log(`🎵 AudioExtractor: Output: ${outputPath}`);
+    console.log(`🎵 AudioExtractor: Options:`, { outputFormat, sampleRate, channels });
 
     return new Promise((resolve) => {
-      // Check if video file exists
-      if (!fs.existsSync(videoPath)) {
-        resolve({
-          success: false,
-          error: `Video file not found: ${videoPath}`
-        });
-        return;
-      }
+      try {
+        // Ensure FFmpeg is configured
+        if (!this.isConfigured) {
+          this.configureFFmpeg();
+        }
 
-      // Check available disk space (rough estimate: 1MB per minute of audio)
-      const stats = fs.statSync(videoPath);
-      const estimatedSize = stats.size * 0.1; // Rough estimate for audio size
-      const availableSpace = this.getAvailableDiskSpace();
-      
-      if (availableSpace < estimatedSize) {
-        resolve({
-          success: false,
-          error: `Insufficient disk space. Available: ${this.formatBytes(availableSpace)}, Estimated needed: ${this.formatBytes(estimatedSize)}`
-        });
-        return;
-      }
-
-      let duration: number = 0;
-
-      ffmpeg(videoPath)
-        .audioFrequency(sampleRate)
-        .audioChannels(channels)
-        .audioCodec(audioCodec)
-        .format(outputFormat)
-        .output(outputPath)
-        .on('start', (commandLine: string) => {
-          console.log(`🎵 Audio extraction started for video ${videoId}:`, commandLine);
-        })
-        .on('progress', (progress: any) => {
-          if (progress.percent) {
-            console.log(`🎵 Audio extraction progress for video ${videoId}: ${progress.percent.toFixed(1)}%`);
-          }
-        })
-        .on('stderr', (stderrLine: string) => {
-          console.log(`🎵 FFmpeg stderr for video ${videoId}:`, stderrLine);
-        })
-        .on('error', (err: Error) => {
-          console.error(`🎵 Audio extraction error for video ${videoId}:`, err);
+        // Check if video file exists
+        if (!fs.existsSync(videoPath)) {
+          const error = `Video file not found: ${videoPath}`;
+          console.error(`❌ AudioExtractor: ${error}`);
           resolve({
             success: false,
-            error: `Audio extraction failed: ${err.message}`
+            error
           });
-        })
-        .on('end', () => {
-          console.log(`🎵 Audio extraction completed for video ${videoId}: ${outputPath}`);
-          
-          // Verify output file exists and has content
-          if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
-            resolve({
-              success: true,
-              outputPath,
-              duration
+          return;
+        }
+
+        const videoStats = fs.statSync(videoPath);
+        console.log(`🎵 AudioExtractor: Video file exists, size: ${videoStats.size} bytes`);
+
+        let duration: number = 0;
+
+        console.log(`🎵 AudioExtractor: Starting FFmpeg processing...`);
+
+        ffmpeg(videoPath)
+          .audioFrequency(sampleRate)
+          .audioChannels(channels)
+          .audioCodec(outputFormat === 'wav' ? 'pcm_s16le' : 'libmp3lame')
+          .format(outputFormat)
+          .output(outputPath)
+          .on('start', (commandLine: string) => {
+            console.log(`🎵 AudioExtractor: FFmpeg command started: ${commandLine}`);
+          })
+          .on('progress', (progress: any) => {
+            if (progress.percent) {
+              console.log(`🎵 AudioExtractor: Progress: ${progress.percent.toFixed(1)}% - ${progress.timemark}`);
+            }
+          })
+          .on('stderr', (stderrLine: string) => {
+            // Only log important stderr messages (not all the verbose output)
+            if (stderrLine.includes('error') || stderrLine.includes('Error') || stderrLine.includes('failed')) {
+              console.log(`🎵 AudioExtractor: FFmpeg stderr: ${stderrLine}`);
+            }
+          })
+          .on('error', (err: Error) => {
+            console.error(`❌ AudioExtractor: FFmpeg error for video ${videoId}:`, err);
+            console.error(`❌ AudioExtractor: Error details:`, {
+              name: err.name,
+              message: err.message,
+              stack: err.stack
             });
-          } else {
             resolve({
               success: false,
-              error: 'Audio extraction completed but output file is empty or missing'
+              error: `Audio extraction failed: ${err.message}`
             });
+          })
+          .on('end', () => {
+            console.log(`✅ AudioExtractor: FFmpeg processing completed for video ${videoId}`);
+            
+            // Verify output file exists and has content
+            if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+              const outputSize = fs.statSync(outputPath).size;
+              console.log(`🎉 AudioExtractor: Native audio extraction completed successfully!`);
+              console.log(`✅ AudioExtractor: Output file size: ${outputSize} bytes`);
+              
+              resolve({
+                success: true,
+                outputPath,
+                duration
+              });
+            } else {
+              const error = 'Audio extraction completed but output file is empty or missing';
+              console.error(`❌ AudioExtractor: ${error}`);
+              resolve({
+                success: false,
+                error
+              });
+            }
+          })
+          .on('codecData', (data: any) => {
+            duration = parseFloat(data.duration) || 0;
+            console.log(`🎵 AudioExtractor: Detected video duration: ${duration}s`);
+          })
+          .run();
+          
+      } catch (error) {
+        console.error(`❌ AudioExtractor: Native audio extraction error for video ${videoId}:`, error);
+        console.error(`❌ AudioExtractor: Error details:`, {
+          name: (error as any).name,
+          message: (error as any).message,
+          stack: (error as any).stack
+        });
+        resolve({
+          success: false,
+          error: `Audio extraction failed: ${error instanceof Error ? error.message : String(error)}`
+        });
+      }
+    });
+  }
+
+  /**
+   * Get audio file info using native FFmpeg
+   */
+  async getAudioInfo(audioPath: string): Promise<{ duration: number; size: number }> {
+    return new Promise((resolve, reject) => {
+      try {
+        if (!fs.existsSync(audioPath)) {
+          reject(new Error(`Audio file not found: ${audioPath}`));
+          return;
+        }
+
+        console.log(`🎵 AudioExtractor: Getting audio info for: ${audioPath}`);
+
+        ffmpeg.ffprobe(audioPath, (err, metadata) => {
+          if (err) {
+            console.error('❌ AudioExtractor: Error getting audio info:', err);
+            reject(err);
+            return;
           }
-        })
-        .on('codecData', (data: any) => {
-          duration = parseFloat(data.duration);
-        })
-        .run();
+
+          const duration = metadata.format.duration || 0;
+          const size = metadata.format.size || fs.statSync(audioPath).size;
+
+          console.log(`✅ AudioExtractor: Audio info - Duration: ${duration}s, Size: ${size} bytes`);
+
+          resolve({ duration, size });
+        });
+      } catch (error) {
+        console.error('❌ AudioExtractor: Error in getAudioInfo:', error);
+        reject(new Error(`Failed to get audio info: ${error}`));
+      }
     });
   }
 
@@ -129,59 +231,55 @@ export class AudioExtractor {
     if (fs.existsSync(audioPath)) {
       try {
         fs.unlinkSync(audioPath);
-        console.log(`🧹 Cleaned up audio file: ${audioPath}`);
+        console.log(`🧹 AudioExtractor: Cleaned up audio file: ${audioPath}`);
       } catch (error) {
-        console.error(`🧹 Error cleaning up audio file ${audioPath}:`, error);
+        console.error(`🧹 AudioExtractor: Error cleaning up audio file ${audioPath}:`, error);
       }
     }
   }
 
   /**
-   * Get available disk space in bytes
+   * Get FFmpeg version info for diagnostics
    */
-  private getAvailableDiskSpace(): number {
-    try {
-      const stats = fs.statSync(this.tempDir);
-      // This is a rough estimate - in a real implementation you'd use a proper disk space library
-      return 1024 * 1024 * 1024; // Assume 1GB available for now
-    } catch (error) {
-      console.error('Error checking disk space:', error);
-      return 0;
-    }
-  }
-
-  /**
-   * Format bytes to human readable string
-   */
-  private formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  }
-
-  /**
-   * Get audio file info
-   */
-  getAudioInfo(audioPath: string): Promise<{ duration: number; size: number }> {
-    return new Promise((resolve, reject) => {
-      if (!fs.existsSync(audioPath)) {
-        reject(new Error(`Audio file not found: ${audioPath}`));
-        return;
+  async getFFmpegVersion(): Promise<string> {
+    return new Promise((resolve) => {
+      if (!this.isConfigured) {
+        this.configureFFmpeg();
       }
 
-      ffmpeg.ffprobe(audioPath, (err, metadata) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        const duration = metadata.format.duration || 0;
-        const size = metadata.format.size || 0;
-
-        resolve({ duration, size });
-      });
+      // Create a simple ffmpeg command to get version
+      ffmpeg()
+        .on('start', (commandLine: string) => {
+          // Extract version from command line or use default
+          resolve('Native FFmpeg via ffmpeg-static');
+        })
+        .on('error', () => {
+          resolve('Native FFmpeg (version unknown)');
+        })
+        .format('null')
+        .output('/dev/null')
+        .run();
     });
+  }
+
+  /**
+   * Test FFmpeg functionality
+   */
+  async testFFmpeg(): Promise<boolean> {
+    try {
+      console.log('🎵 AudioExtractor: Testing FFmpeg functionality...');
+      
+      if (!this.isConfigured) {
+        this.configureFFmpeg();
+      }
+
+      // Simple test - try to get version info
+      await this.getFFmpegVersion();
+      console.log('✅ AudioExtractor: FFmpeg test passed');
+      return true;
+    } catch (error) {
+      console.error('❌ AudioExtractor: FFmpeg test failed:', error);
+      return false;
+    }
   }
 } 

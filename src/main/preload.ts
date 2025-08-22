@@ -37,6 +37,8 @@ const IPC_CHANNELS = {
   GET_VIDEOS: 'get-videos',
   TRANSCRIBE_VIDEO: 'transcribe-video',
   GET_TRANSCRIPT: 'get-transcript',
+  TRANSCRIPTION_COMPLETED: 'transcription-completed',
+  TRANSCRIPTION_FAILED: 'transcription-failed',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -62,6 +64,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   getTranscript: (videoId: number): Promise<TranscriptSegment[]> => 
     ipcRenderer.invoke(IPC_CHANNELS.GET_TRANSCRIPT, videoId),
+
+  onTranscriptionCompleted: (callback: (data: { videoId: number; jobId: string }) => void) => {
+    ipcRenderer.on(IPC_CHANNELS.TRANSCRIPTION_COMPLETED, (event, data) => callback(data));
+  },
+
+  onTranscriptionFailed: (callback: (data: { videoId: number; jobId: string; error: string }) => void) => {
+    ipcRenderer.on(IPC_CHANNELS.TRANSCRIPTION_FAILED, (event, data) => callback(data));
+  },
 });
 
 // Type definitions for the exposed API
@@ -74,6 +84,8 @@ declare global {
       transcribeVideo: (videoId: number) => Promise<{ success: boolean; message: string }>;
       searchVideos: (query: string) => Promise<SearchResult[]>;
       getTranscript: (videoId: number) => Promise<TranscriptSegment[]>;
+      onTranscriptionCompleted: (callback: (data: { videoId: number; jobId: string }) => void) => void;
+      onTranscriptionFailed: (callback: (data: { videoId: number; jobId: string; error: string }) => void) => void;
     };
   }
 }

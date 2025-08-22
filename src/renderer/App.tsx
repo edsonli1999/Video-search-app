@@ -1,24 +1,40 @@
 import React, { useState, useEffect } from 'react';
-import { VideoFile, SearchResult } from '../shared/types';
+import { VideoFile, SearchResult, TranscriptSegment } from '../shared/types';
 import './App.css';
 
 const App: React.FC = () => {
   const [videos, setVideos] = useState<VideoFile[]>([]);
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(() => {
+    // Load selected folder from localStorage on startup
+    return localStorage.getItem('selectedVideoFolder');
+  });
   const [isScanning, setIsScanning] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [currentVideo, setCurrentVideo] = useState<VideoFile | null>(null);
+  const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
+  const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
 
   console.log('🔍 App render - searchQuery:', searchQuery);
   console.log('🔍 App render - searchResults:', searchResults);
   console.log('🔍 App render - searchResults.length:', searchResults.length);
   console.log('🔍 App render - isSearching:', isSearching);
 
-  // Load existing videos on app start
+  // Load existing videos on app start and set up event listeners
   useEffect(() => {
     loadVideos();
+    
+    // Listen for transcription completion events
+    window.electronAPI.onTranscriptionCompleted((data) => {
+      console.log(`🎉 Frontend: Transcription completed for video ${data.videoId}`);
+      loadVideos(); // Reload videos to update status
+    });
+    
+    window.electronAPI.onTranscriptionFailed((data) => {
+      console.log(`❌ Frontend: Transcription failed for video ${data.videoId}:`, data.error);
+      loadVideos(); // Reload videos to update status
+    });
   }, []);
 
   const loadVideos = async () => {
@@ -44,6 +60,9 @@ const App: React.FC = () => {
       const folderPath = await window.electronAPI.selectFolder();
       if (folderPath) {
         setSelectedFolder(folderPath);
+        // Save to localStorage for persistence
+        localStorage.setItem('selectedVideoFolder', folderPath);
+        
         setIsScanning(true);
         
         const scannedVideos = await window.electronAPI.scanVideos(folderPath);
@@ -87,10 +106,12 @@ const App: React.FC = () => {
     }
   };
 
-  const handleTranscribeVideo = async (video: VideoFile) => {
+  const handleTranscribeVideo = async (video: VideoFile, isRetranscribe: boolean = false) => {
     if (!video.id) return;
 
     try {
+      console.log(`${isRetranscribe ? '🔄 Re-transcribing' : '🎬 Transcribing'} video ${video.id}: ${video.fileName}`);
+      
       // Update video status locally
       setVideos(prev => prev.map(v => 
         v.id === video.id ? { ...v, transcriptionStatus: 'processing' } : v
@@ -99,8 +120,8 @@ const App: React.FC = () => {
       const result = await window.electronAPI.transcribeVideo(video.id);
       
       if (result.success) {
-        // Reload videos to get updated status
-        await loadVideos();
+        console.log(`📋 Frontend: ${isRetranscribe ? 'Re-transcription' : 'Transcription'} job queued for video ${video.id}`);
+        // Don't reload immediately - wait for completion event
       }
     } catch (error) {
       console.error('Error transcribing video:', error);
@@ -109,6 +130,31 @@ const App: React.FC = () => {
         v.id === video.id ? { ...v, transcriptionStatus: 'failed' } : v
       ));
     }
+  };
+
+  const handleViewTranscript = async (video: VideoFile) => {
+    if (!video.id) return;
+
+    try {
+      setIsLoadingTranscript(true);
+      setCurrentVideo(video);
+      
+      console.log(`📝 Loading transcript for video ${video.id}`);
+      const segments = await window.electronAPI.getTranscript(video.id);
+      console.log(`📝 Loaded ${segments.length} transcript segments`);
+      
+      setTranscriptSegments(segments);
+    } catch (error) {
+      console.error('Error loading transcript:', error);
+      setTranscriptSegments([]);
+    } finally {
+      setIsLoadingTranscript(false);
+    }
+  };
+
+  const handleCloseTranscript = () => {
+    setCurrentVideo(null);
+    setTranscriptSegments([]);
   };
 
   const formatFileSize = (bytes: number): string => {
@@ -213,11 +259,30 @@ const App: React.FC = () => {
                   )}
                   
                   {video.transcriptionStatus === 'completed' && (
+                    <div className="completed-actions">
+                      <button 
+                        onClick={() => handleViewTranscript(video)}
+                        className="view-btn"
+                      >
+                        View Transcript
+                      </button>
+                      <button 
+                        onClick={() => handleTranscribeVideo(video, true)}
+                        className="retranscribe-btn"
+                        title="Re-transcribe this video (useful for testing/debugging)"
+                      >
+                        🔄 Re-transcribe
+                      </button>
+                    </div>
+                  )}
+                  
+                  {video.transcriptionStatus === 'failed' && (
                     <button 
-                      onClick={() => setCurrentVideo(video)}
-                      className="view-btn"
+                      onClick={() => handleTranscribeVideo(video, true)}
+                      className="retry-btn"
+                      title="Retry transcription"
                     >
-                      View Transcript
+                      🔄 Retry
                     </button>
                   )}
                 </div>
@@ -225,6 +290,54 @@ const App: React.FC = () => {
             ))}
           </div>
         </div>
+
+        {/* Transcript Modal */}
+        {currentVideo && (
+          <div className="transcript-modal-overlay" onClick={handleCloseTranscript}>
+            <div className="transcript-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="transcript-header">
+                <h2>Transcript: {currentVideo.fileName}</h2>
+                <button 
+                  onClick={handleCloseTranscript}
+                  className="close-btn"
+                  aria-label="Close transcript"
+                >
+                  ✕
+                </button>
+              </div>
+              
+              <div className="transcript-content">
+                {isLoadingTranscript ? (
+                  <div className="loading">Loading transcript...</div>
+                ) : transcriptSegments.length > 0 ? (
+                  <div className="transcript-segments">
+                    {transcriptSegments.map((segment, index) => (
+                      <div key={segment.id || index} className="segment">
+                        <span className="timestamp">
+                          {formatTime(segment.startTime)} - {formatTime(segment.endTime)}
+                        </span>
+                        <p className="segment-text">{segment.text}</p>
+                        {segment.confidence && (
+                          <span className="confidence">
+                            Confidence: {Math.round(segment.confidence * 100)}%
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="no-transcript">
+                    No transcript segments found. 
+                    {currentVideo.transcriptionStatus === 'completed' 
+                      ? ' The video may have been silent or contain no speech.'
+                      : ' Please transcribe this video first.'
+                    }
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

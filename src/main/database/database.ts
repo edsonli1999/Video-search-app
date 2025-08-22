@@ -263,6 +263,19 @@ export class VideoDatabase {
     }
   }
 
+  clearTranscriptSegments(videoId: number): void {
+    if (this.isAvailable) {
+      console.log(`🗑️ Database: Clearing transcript segments for video ${videoId}`);
+      const stmt = this.db.prepare('DELETE FROM transcript_segments WHERE video_id = ?');
+      const result = stmt.run(videoId);
+      console.log(`🗑️ Database: Deleted ${result.changes} transcript segments for video ${videoId}`);
+    } else {
+      // Memory-based implementation
+      this.memoryTranscripts.delete(videoId);
+      console.log(`🗑️ Memory: Cleared transcript segments for video ${videoId}`);
+    }
+  }
+
   // Search operations
   searchTranscripts(query: string, limit: number = 50): SearchResult[] {
     console.log('🔍 DB: searchTranscripts called with query:', query, 'limit:', limit);

@@ -88,7 +88,18 @@ export class TranscriptionOrchestrator extends EventEmitter {
     const { videoId, videoPath } = job;
     
     try {
-      console.log(`🎬 Starting transcription for video ${videoId}: ${videoPath}`);
+      // Check if this is a re-transcription
+      const videos = this.database.getAllVideos();
+      const video = videos.find(v => v.id === videoId);
+      const isRetranscribe = video?.transcriptionStatus === 'completed';
+      
+      console.log(`${isRetranscribe ? '🔄 Re-transcribing' : '🎬 Starting transcription for'} video ${videoId}: ${videoPath}`);
+      
+      // Clear existing transcript segments for re-transcription
+      if (isRetranscribe) {
+        console.log(`🧹 Clearing existing transcript segments for video ${videoId}`);
+        this.database.clearTranscriptSegments(videoId);
+      }
 
       // Stage 1: Audio Extraction (0-30%)
       this.emit('progress', {
@@ -149,23 +160,28 @@ export class TranscriptionOrchestrator extends EventEmitter {
         message: 'Storing transcript in database...'
       });
 
-      // Convert transcription segments to database format
-      const dbSegments = transcriptionResult.segments!.map(segment => ({
+      // Handle transcription results (including 0 segments case)
+      const segments = transcriptionResult.segments || [];
+      const dbSegments = segments.map(segment => ({
         startTime: segment.start,
         endTime: segment.end,
         text: segment.text,
         confidence: segment.confidence
       }));
 
-      // Store in database
-      this.database.insertTranscriptSegments(videoId, dbSegments);
+      // Store in database (even if 0 segments)
+      if (dbSegments.length > 0) {
+        this.database.insertTranscriptSegments(videoId, dbSegments);
+      }
       this.database.updateVideoTranscriptionStatus(videoId, 'completed');
 
       this.emit('progress', {
         videoId,
         stage: 'database_storage',
         progress: 100,
-        message: 'Transcript stored successfully'
+        message: dbSegments.length > 0 
+          ? 'Transcript stored successfully'
+          : 'No speech detected, marked as completed'
       });
 
       console.log(`✅ Transcription completed for video ${videoId}: ${dbSegments.length} segments`);

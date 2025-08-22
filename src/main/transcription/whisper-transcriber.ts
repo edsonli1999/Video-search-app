@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import { EventEmitter } from 'events';
+import { WaveFile } from 'wavefile';
 
 // Define types for the dynamically imported module
 type Pipeline = any;
@@ -156,18 +157,18 @@ export class WhisperTranscriber extends EventEmitter {
       this.emit('progress', { stage: 'transcribing', progress: 0, message: 'Starting transcription' });
 
       const {
-        language = 'auto',
+        language = 'en',  // Default to English instead of 'auto'
         task = 'transcribe',
         chunkLength = 30,
         strideLength = 5
       } = options;
 
-      // Get audio file info
-      const audioBuffer = fs.readFileSync(audioPath);
+      // Manual audio reading for Node.js environment (no AudioContext available)
+      const audioBuffer = this.readWAVFileManually(audioPath);
       
       // Configure transcription options
       const transcriptionOptions = {
-        language,
+        language, // Always include language parameter
         task,
         chunk_length_s: chunkLength,
         stride_length_s: strideLength,
@@ -180,11 +181,23 @@ export class WhisperTranscriber extends EventEmitter {
       // Perform transcription
       const result = await this.model(audioBuffer, transcriptionOptions);
       
+      // DEBUG: Log the raw Whisper result
+      console.log(`🔍 DEBUG: Raw Whisper result structure:`, JSON.stringify(result, null, 2));
+      console.log(`🔍 DEBUG: Result has 'chunks'?`, !!result.chunks);
+      console.log(`🔍 DEBUG: Result has 'segments'?`, !!result.segments);
+      console.log(`🔍 DEBUG: Result has 'text'?`, !!result.text);
+      console.log(`🔍 DEBUG: Result keys:`, Object.keys(result));
+      
       console.log(`✅ Transcription completed for: ${audioPath}`);
       this.emit('progress', { stage: 'transcribing', progress: 100, message: 'Transcription completed' });
 
       // Process and format segments
       const segments = this.processSegments(result);
+      
+      console.log(`🔍 DEBUG: Final processed segments: ${segments.length}`);
+      if (segments.length > 0) {
+        console.log(`🔍 DEBUG: First segment:`, segments[0]);
+      }
       
       return {
         success: true,
@@ -205,11 +218,14 @@ export class WhisperTranscriber extends EventEmitter {
    * Process and format transcription segments
    */
   private processSegments(result: any): TranscriptionSegment[] {
+    console.log(`🔍 DEBUG: processSegments called with result:`, Object.keys(result));
     const segments: TranscriptionSegment[] = [];
 
     if (result.chunks && Array.isArray(result.chunks)) {
+      console.log(`🔍 DEBUG: Processing ${result.chunks.length} chunks`);
       // Handle chunked output
-      result.chunks.forEach((chunk: any) => {
+      result.chunks.forEach((chunk: any, index: number) => {
+        console.log(`🔍 DEBUG: Chunk ${index}:`, chunk);
         if (chunk.timestamp && chunk.text) {
           segments.push({
             start: chunk.timestamp[0],
@@ -220,8 +236,10 @@ export class WhisperTranscriber extends EventEmitter {
         }
       });
     } else if (result.segments && Array.isArray(result.segments)) {
+      console.log(`🔍 DEBUG: Processing ${result.segments.length} segments`);
       // Handle segment output
-      result.segments.forEach((segment: any) => {
+      result.segments.forEach((segment: any, index: number) => {
+        console.log(`🔍 DEBUG: Segment ${index}:`, segment);
         segments.push({
           start: segment.start || 0,
           end: segment.end || 0,
@@ -230,6 +248,7 @@ export class WhisperTranscriber extends EventEmitter {
         });
       });
     } else if (result.text) {
+      console.log(`🔍 DEBUG: Processing single text result: "${result.text}"`);
       // Handle single text output (no timestamps)
       segments.push({
         start: 0,
@@ -237,15 +256,22 @@ export class WhisperTranscriber extends EventEmitter {
         text: result.text.trim(),
         confidence: 0.8
       });
+    } else {
+      console.log(`🔍 DEBUG: No recognized result format found. Available keys:`, Object.keys(result));
     }
 
+    console.log(`🔍 DEBUG: Found ${segments.length} segments before filtering`);
+    
     // Filter out empty segments and normalize confidence scores
-    return segments
+    const filteredSegments = segments
       .filter(segment => segment.text.length > 0)
       .map(segment => ({
         ...segment,
         confidence: Math.max(0, Math.min(1, segment.confidence)) // Clamp between 0 and 1
       }));
+    
+    console.log(`🔍 DEBUG: ${filteredSegments.length} segments after filtering`);
+    return filteredSegments;
   }
 
   /**
@@ -276,6 +302,54 @@ export class WhisperTranscriber extends EventEmitter {
     };
 
     return modelInfo[modelName] || { size: 'Unknown', speed: 'Unknown', accuracy: 'Unknown' };
+  }
+
+  /**
+   * Manually read WAV file for Node.js environment using wavefile package
+   * Following the exact pattern from HuggingFace Node.js documentation
+   */
+  private readWAVFileManually(filePath: string): Float32Array {
+    console.log(`🎵 Reading WAV file manually: ${filePath}`);
+    
+    try {
+      // Read the entire WAV file
+      const buffer = fs.readFileSync(filePath);
+      
+      // Create WaveFile instance and load the buffer
+      const wav = new WaveFile(buffer);
+      
+      // Convert to the format expected by Whisper (32-bit float, 16kHz)
+      wav.toBitDepth('32f'); // Pipeline expects input as a Float32Array
+      wav.toSampleRate(16000); // Whisper expects audio with a sampling rate of 16000
+      
+      // Get the audio samples
+      let audioData: any = wav.getSamples();
+      
+      console.log(`🎵 WAV file processed, audio data type: ${Array.isArray(audioData) ? 'multi-channel array' : 'single array'}`);
+      
+      // Handle multi-channel audio (convert to mono)
+      if (Array.isArray(audioData)) {
+        if (audioData.length > 1) {
+          // Merge channels (into first channel to save memory)
+          const SCALING_FACTOR = Math.sqrt(2);
+          console.log(`🎵 Converting ${audioData.length} channels to mono`);
+          
+          for (let i = 0; i < audioData[0].length; ++i) {
+            audioData[0][i] = SCALING_FACTOR * (audioData[0][i] + audioData[1][i]) / 2;
+          }
+        }
+        
+        // Select first channel
+        audioData = audioData[0];
+      }
+      
+      console.log(`✅ WAV file converted to Float32Array: ${audioData.length} samples at 16kHz`);
+      return audioData;
+      
+    } catch (error) {
+      console.error(`❌ Error reading WAV file: ${error}`);
+      throw new Error(`Failed to read WAV file: ${error}`);
+    }
   }
 
   /**

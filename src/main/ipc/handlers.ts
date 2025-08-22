@@ -1,4 +1,4 @@
-import { ipcMain, dialog } from 'electron';
+import { ipcMain, dialog, BrowserWindow } from 'electron';
 import { IPC_CHANNELS } from '../../shared/types';
 import { getDatabase } from '../database/database';
 import { VideoScanner } from '../video/video-scanner';
@@ -6,9 +6,28 @@ import { TranscriptionOrchestrator } from '../transcription';
 
 const db = getDatabase();
 const videoScanner = new VideoScanner();
+
+// Initialize transcription orchestrator
 const transcriptionOrchestrator = new TranscriptionOrchestrator(db);
 
-export function setupIpcHandlers(): void {
+export function setupIpcHandlers(mainWindow: BrowserWindow): void {
+  // Set up transcription event listeners to notify frontend
+  transcriptionOrchestrator.on('jobCompleted', (job) => {
+    console.log(`📡 IPC: Notifying frontend that job ${job.id} completed for video ${job.videoId}`);
+    mainWindow.webContents.send(IPC_CHANNELS.TRANSCRIPTION_COMPLETED, {
+      videoId: job.videoId,
+      jobId: job.id
+    });
+  });
+
+  transcriptionOrchestrator.on('jobFailed', (job) => {
+    console.log(`📡 IPC: Notifying frontend that job ${job.id} failed for video ${job.videoId}`);
+    mainWindow.webContents.send(IPC_CHANNELS.TRANSCRIPTION_FAILED, {
+      videoId: job.videoId,
+      jobId: job.id,
+      error: job.error
+    });
+  });
   // Handle folder selection
   ipcMain.handle(IPC_CHANNELS.SELECT_FOLDER, async () => {
     try {
@@ -97,6 +116,9 @@ export function setupIpcHandlers(): void {
       if (!video) {
         throw new Error(`Video with ID ${videoId} not found`);
       }
+
+      // Initialize transcription orchestrator if not already done
+      await transcriptionOrchestrator.initialize();
 
       // Queue the transcription job
       const jobId = await transcriptionOrchestrator.queueTranscription(videoId, video.filePath);
