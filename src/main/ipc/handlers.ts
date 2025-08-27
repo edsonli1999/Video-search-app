@@ -107,7 +107,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   // Handle transcription with real Whisper implementation
   ipcMain.handle(IPC_CHANNELS.TRANSCRIBE_VIDEO, async (event, videoId: number) => {
     try {
-      console.log(`🎬 IPC: Starting transcription for video ${videoId}`);
+      console.log(`🎬 IPC: Transcription request received for video ${videoId}`);
       
       // Get video information
       const videos = db.getAllVideos();
@@ -115,6 +115,17 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       
       if (!video) {
         throw new Error(`Video with ID ${videoId} not found`);
+      }
+
+      // Check if video is already being processed
+      const existingJob = transcriptionOrchestrator.getJobByVideoId(videoId);
+      if (existingJob && (existingJob.status === 'queued' || existingJob.status === 'processing')) {
+        console.log(`⚠️ IPC: Video ${videoId} is already being transcribed (job: ${existingJob.id})`);
+        return {
+          success: true,
+          message: 'Video is already being transcribed',
+          jobId: existingJob.id
+        };
       }
 
       // Initialize transcription orchestrator if not already done

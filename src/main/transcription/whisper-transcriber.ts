@@ -260,10 +260,14 @@ export class WhisperTranscriber extends EventEmitter {
       console.log(`🔍 DEBUG: No recognized result format found. Available keys:`, Object.keys(result));
     }
 
-    console.log(`🔍 DEBUG: Found ${segments.length} segments before filtering`);
+    console.log(`🔍 DEBUG: Found ${segments.length} segments before deduplication`);
+    
+    // Deduplicate overlapping segments from chunked processing
+    const deduplicatedSegments = this.deduplicateSegments(segments);
+    console.log(`🔍 DEBUG: ${deduplicatedSegments.length} segments after deduplication`);
     
     // Filter out empty segments and normalize confidence scores
-    const filteredSegments = segments
+    const filteredSegments = deduplicatedSegments
       .filter(segment => segment.text.length > 0)
       .map(segment => ({
         ...segment,
@@ -272,6 +276,91 @@ export class WhisperTranscriber extends EventEmitter {
     
     console.log(`🔍 DEBUG: ${filteredSegments.length} segments after filtering`);
     return filteredSegments;
+  }
+
+  /**
+   * Deduplicate overlapping segments from chunked processing
+   */
+  private deduplicateSegments(segments: TranscriptionSegment[]): TranscriptionSegment[] {
+    if (segments.length === 0) return segments;
+
+    // Sort segments by start time
+    const sorted = [...segments].sort((a, b) => a.start - b.start);
+    const deduplicated: TranscriptionSegment[] = [];
+    let duplicatesFound = 0;
+    
+    for (const segment of sorted) {
+      // Check if this segment overlaps significantly with any existing segment
+      const overlapping = deduplicated.find(existing => 
+        this.segmentsOverlap(existing, segment) && 
+        this.textsSimilar(existing.text, segment.text)
+      );
+      
+      if (overlapping) {
+        duplicatesFound++;
+        console.log(`🔍 DEBUG: Merging duplicate segment "${segment.text.substring(0, 50)}..." (${segment.start}s-${segment.end}s)`);
+        // Merge segments: keep the one with better confidence and extend time range
+        const merged = this.mergeSegments(overlapping, segment);
+        const index = deduplicated.indexOf(overlapping);
+        deduplicated[index] = merged;
+      } else {
+        deduplicated.push(segment);
+      }
+    }
+    
+    if (duplicatesFound > 0) {
+      console.log(`✅ Deduplication: Merged ${duplicatesFound} duplicate segments`);
+    }
+    
+    return deduplicated;
+  }
+
+  /**
+   * Check if two segments overlap significantly in time
+   */
+  private segmentsOverlap(seg1: TranscriptionSegment, seg2: TranscriptionSegment): boolean {
+    const overlap = Math.min(seg1.end, seg2.end) - Math.max(seg1.start, seg2.start);
+    const minDuration = Math.min(seg1.end - seg1.start, seg2.end - seg2.start);
+    // Consider segments overlapping if they share >50% of the shorter segment's duration
+    return overlap > 0 && overlap / minDuration > 0.5;
+  }
+
+  /**
+   * Check if two text segments are similar enough to be considered duplicates
+   */
+  private textsSimilar(text1: string, text2: string): boolean {
+    const clean1 = text1.toLowerCase().trim();
+    const clean2 = text2.toLowerCase().trim();
+    
+    // Exact match
+    if (clean1 === clean2) return true;
+    
+    // Check if one text is contained in the other (for partial overlaps)
+    if (clean1.includes(clean2) || clean2.includes(clean1)) {
+      return true;
+    }
+    
+    // Simple similarity check: >80% character overlap
+    const longer = clean1.length > clean2.length ? clean1 : clean2;
+    const shorter = clean1.length > clean2.length ? clean2 : clean1;
+    const commonChars = [...shorter].filter(char => longer.includes(char)).length;
+    return commonChars / shorter.length > 0.8;
+  }
+
+  /**
+   * Merge two overlapping segments, keeping the best parts of each
+   */
+  private mergeSegments(seg1: TranscriptionSegment, seg2: TranscriptionSegment): TranscriptionSegment {
+    // Use the segment with higher confidence as the base
+    const primary = seg1.confidence >= seg2.confidence ? seg1 : seg2;
+    const secondary = primary === seg1 ? seg2 : seg1;
+    
+    return {
+      start: Math.min(seg1.start, seg2.start),
+      end: Math.max(seg1.end, seg2.end),
+      text: primary.text.length >= secondary.text.length ? primary.text : secondary.text,
+      confidence: Math.max(seg1.confidence, seg2.confidence)
+    };
   }
 
   /**

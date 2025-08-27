@@ -224,6 +224,15 @@ export class VideoDatabase {
   // Transcript operations
   insertTranscriptSegments(videoId: number, segments: Omit<TranscriptSegment, 'id' | 'videoId'>[]): void {
     if (this.isAvailable) {
+      console.log(`📝 Database: Inserting ${segments.length} transcript segments for video ${videoId}`);
+      
+      // Check if any segments already exist for this video
+      const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM transcript_segments WHERE video_id = ?');
+      const beforeCount = countStmt.get(videoId).count;
+      if (beforeCount > 0) {
+        console.warn(`⚠️ Database: Video ${videoId} already has ${beforeCount} segments! This may indicate a clearing issue.`);
+      }
+      
       const stmt = this.db.prepare(`
         INSERT INTO transcript_segments (video_id, start_time, end_time, text, confidence)
         VALUES (?, ?, ?, ?, ?)
@@ -236,8 +245,13 @@ export class VideoDatabase {
       });
 
       transaction(segments);
+      
+      // Verify insertion
+      const afterCount = countStmt.get(videoId).count;
+      console.log(`📝 Database: Successfully inserted segments. Total count for video ${videoId}: ${afterCount}`);
     } else {
       // Memory-based implementation
+      console.log(`📝 Memory: Inserting ${segments.length} transcript segments for video ${videoId}`);
       const transcriptSegments: TranscriptSegment[] = segments.map((segment, index) => ({
         id: Date.now() + index,
         videoId,
@@ -265,12 +279,27 @@ export class VideoDatabase {
 
   clearTranscriptSegments(videoId: number): void {
     if (this.isAvailable) {
-      console.log(`🗑️ Database: Clearing transcript segments for video ${videoId}`);
-      const stmt = this.db.prepare('DELETE FROM transcript_segments WHERE video_id = ?');
-      const result = stmt.run(videoId);
+      // First, check how many segments exist
+      const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM transcript_segments WHERE video_id = ?');
+      const beforeCount = countStmt.get(videoId).count;
+      console.log(`🗑️ Database: Found ${beforeCount} existing segments for video ${videoId} before clearing`);
+      
+      // Clear the segments
+      const deleteStmt = this.db.prepare('DELETE FROM transcript_segments WHERE video_id = ?');
+      const result = deleteStmt.run(videoId);
       console.log(`🗑️ Database: Deleted ${result.changes} transcript segments for video ${videoId}`);
+      
+      // Verify they were actually deleted
+      const afterCount = countStmt.get(videoId).count;
+      console.log(`🗑️ Database: ${afterCount} segments remain after clearing`);
+      
+      if (afterCount > 0) {
+        console.error(`❌ Database: Failed to clear all segments! ${afterCount} segments still exist`);
+      }
     } else {
       // Memory-based implementation
+      const existingCount = this.memoryTranscripts.get(videoId)?.length || 0;
+      console.log(`🗑️ Memory: Found ${existingCount} existing segments for video ${videoId}`);
       this.memoryTranscripts.delete(videoId);
       console.log(`🗑️ Memory: Cleared transcript segments for video ${videoId}`);
     }

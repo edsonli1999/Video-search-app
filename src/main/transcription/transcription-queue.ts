@@ -85,7 +85,7 @@ export class TranscriptionQueue extends EventEmitter {
   }
 
   /**
-   * Get job status
+   * Get job status by job ID
    */
   getJobStatus(jobId: string): TranscriptionJob | null {
     // Check processing job
@@ -95,6 +95,19 @@ export class TranscriptionQueue extends EventEmitter {
 
     // Check queued jobs
     return this.queue.find(job => job.id === jobId) || null;
+  }
+
+  /**
+   * Get job status by video ID
+   */
+  getJobByVideoId(videoId: number): TranscriptionJob | null {
+    // Check processing job
+    if (this.processing && this.processing.videoId === videoId) {
+      return this.processing;
+    }
+
+    // Check queued jobs
+    return this.queue.find(job => job.videoId === videoId) || null;
   }
 
   /**

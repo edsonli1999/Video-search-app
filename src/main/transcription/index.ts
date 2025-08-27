@@ -71,8 +71,8 @@ export class TranscriptionOrchestrator extends EventEmitter {
       await this.initialize();
     }
 
-    // Update video status to processing
-    this.database.updateVideoTranscriptionStatus(videoId, 'processing');
+    // Don't update status to processing yet - let processTranscriptionJob handle it
+    // This allows proper re-transcription detection
 
     // Add to queue
     const jobId = this.queue.addJob(videoId, videoPath, options.priority || 0);
@@ -88,7 +88,7 @@ export class TranscriptionOrchestrator extends EventEmitter {
     const { videoId, videoPath } = job;
     
     try {
-      // Check if this is a re-transcription
+      // Check if this is a re-transcription BEFORE changing status
       const videos = this.database.getAllVideos();
       const video = videos.find(v => v.id === videoId);
       const isRetranscribe = video?.transcriptionStatus === 'completed';
@@ -100,6 +100,9 @@ export class TranscriptionOrchestrator extends EventEmitter {
         console.log(`🧹 Clearing existing transcript segments for video ${videoId}`);
         this.database.clearTranscriptSegments(videoId);
       }
+
+      // Now update status to processing (after checking and clearing)
+      this.database.updateVideoTranscriptionStatus(videoId, 'processing');
 
       // Stage 1: Audio Extraction (0-30%)
       this.emit('progress', {
@@ -209,6 +212,13 @@ export class TranscriptionOrchestrator extends EventEmitter {
     const videos = this.database.getAllVideos();
     const video = videos.find(v => v.id === videoId);
     return video?.transcriptionStatus || 'unknown';
+  }
+
+  /**
+   * Get job status by video ID
+   */
+  getJobByVideoId(videoId: number): TranscriptionJob | null {
+    return this.queue.getJobByVideoId(videoId);
   }
 
   /**
