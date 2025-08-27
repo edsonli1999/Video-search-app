@@ -229,6 +229,20 @@ export class TranscriptionOrchestrator extends EventEmitter {
   }
 
   /**
+   * Cleanup transcription resources
+   */
+  async cleanup(): Promise<void> {
+    console.log('🧹 Cleaning up transcription resources...');
+    
+    // Terminate worker thread
+    if (this.whisperTranscriber) {
+      await this.whisperTranscriber.terminate();
+    }
+    
+    console.log('✅ Transcription resources cleaned up');
+  }
+
+  /**
    * Get all jobs
    */
   getAllJobs() {
@@ -273,10 +287,6 @@ export class TranscriptionOrchestrator extends EventEmitter {
   /**
    * Get model info
    */
-  getModelInfo(modelName: string) {
-    return WhisperTranscriber.getModelInfo(modelName);
-  }
-
   /**
    * Setup event listeners for progress tracking
    */
@@ -302,18 +312,9 @@ export class TranscriptionOrchestrator extends EventEmitter {
       this.emit('jobProgress', progress);
     });
 
-    // Listen to Whisper transcriber events
+    // Listen to worker-based transcriber events
     this.whisperTranscriber.on('progress', (progress: any) => {
       this.emit('whisperProgress', progress);
     });
-  }
-
-  /**
-   * Cleanup resources
-   */
-  cleanup(): void {
-    this.whisperTranscriber.unloadModel();
-    this.queue.clearAllJobs();
-    console.log('🧹 Transcription orchestrator cleaned up');
   }
 } 
