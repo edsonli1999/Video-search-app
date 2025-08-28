@@ -115,22 +115,29 @@ CREATE TABLE search_history (
 ### ✅ Phase 2: Video File Management (COMPLETE) 
 **Status**: Core functionality complete, enhancements planned for later phases
 
-### ✅ Phase 3: Audio Extraction & Transcription Pipeline (COMPLETE - NEEDS OPTIMIZATION)
+### ✅ Phase 3: Audio Extraction & Transcription Pipeline (COMPLETE + OPTIMIZED)
 
-**Status**: Core transcription pipeline implemented and functional. Transcripts are generated but accuracy needs improvement.
+**Status**: ⭐ **FULLY FUNCTIONAL** - Core pipeline working smoothly with recent critical improvements
 
-#### 🎉 **Implementation Complete**
+#### 🎉 **Implementation Complete + Recent Enhancements**
 
 **FFmpeg Solution**: After evaluating WASM FFmpeg (browser-only limitation), implemented native FFmpeg using `ffmpeg-static` for automatic binary management across platforms.
 
 **Current Architecture**:
 - **Audio Extraction**: Native FFmpeg via `ffmpeg-static` + `fluent-ffmpeg` 
-- **Transcription**: Xenova/transformers with whisper-base model
+- **Transcription**: Xenova/transformers with whisper-base model **in worker thread**
 - **Queue System**: Event-driven job processing with IPC notifications
 - **Progress Tracking**: Real-time updates to frontend via IPC events
 - **File Management**: Auto-cleanup of temp files after processing
+- **Duplicate Prevention**: Automatic segment deduplication and merging
 
-#### ✅ **Completed Features**
+#### ✅ **Recently Completed Critical Improvements**
+- ✅ **Worker Thread Implementation**: Transcription now runs in background without freezing UI
+- ✅ **Duplicate Segment Prevention**: Smart deduplication system merges overlapping segments  
+- ✅ **Re-transcription Database Clearing**: Proper cleanup of old segments before re-transcription
+- ✅ **Enhanced Error Handling**: Better error reporting and recovery
+
+#### ✅ **Previously Completed Features**
 - ✅ Native FFmpeg integration (cross-platform, auto-configured)
 - ✅ Whisper transcription with timestamped segments  
 - ✅ Real-time progress updates in UI
@@ -140,13 +147,21 @@ CREATE TABLE search_history (
 - ✅ Automatic temp file cleanup
 - ✅ Re-transcription capability for testing/debugging
 
-#### 🔧 **Next Optimizations**
+#### 🔧 **Future Optimizations** (Lower Priority)
 - **Transcription Accuracy**: Fine-tune Whisper parameters, language detection
 - **Performance**: Optimize audio preprocessing, consider larger Whisper models
 - **User Experience**: Add transcription cancellation, batch processing UI
 
-### 🔄 Phase 4: Search Implementation (READY)
+### 🔄 Phase 4: Search Implementation & UI Polish (IN PROGRESS)
 **Status**: Infrastructure complete, FTS5 search working with real transcript data
+
+#### 🐛 **Critical Issue Identified**
+- **Search Input Bug**: Search triggers on every keystroke causing focus loss and poor UX
+- **Priority**: CRITICAL - Must fix immediately for app usability
+
+#### 📋 **Planned UI Improvements**
+- **Tab-Based Interface**: Separate views for current folder vs all transcribed videos
+- **Enhanced Navigation**: Better organization and video library management
 
 ### 📋 Phase 5: Video Player Integration (PLANNED)
 ### 📋 Phase 6: UI/UX Polish (PLANNED)  
@@ -155,17 +170,27 @@ CREATE TABLE search_history (
 
 ## Next Steps (Critical Priorities)
 
-### 1. Optimize Transcription Accuracy (Phase 3 Enhancement)
-- **Priority**: MEDIUM
-- **Issue**: Transcription pipeline working but accuracy could be improved
+### 1. 🚨 Fix Search Input Bug (Phase 4 - CRITICAL)
+- **Priority**: HIGH - **BLOCKING UX ISSUE**
+- **Issue**: Search input loses focus on every keystroke due to immediate `handleSearch()` calls
 - **Tasks**:
-  - Fine-tune Whisper language parameters and preprocessing
-  - Test different Whisper model sizes (base vs small vs medium)
-  - Improve audio quality detection and enhancement
-  - Add user feedback mechanism for transcription quality
+  - Implement debounced search (300ms delay after typing stops)
+  - Fix onChange handler to prevent focus loss
+  - Improve search UX with proper loading states
+  - Test search functionality thoroughly
 
-### 2. Enhanced Video Metadata Extraction (Phase 2 Enhancement)
+### 2. 🎨 UI Tab Implementation (Phase 4 - UX Enhancement)
 - **Priority**: MEDIUM
+- **Issue**: Current single-view interface lacks organization
+- **Tasks**:
+  - Create tab-based navigation system
+  - **Tab 1**: Current folder videos (filtered view)
+  - **Tab 2**: All transcribed videos (master library)
+  - Implement proper routing/state management between tabs
+  - Enhance video display and filtering options
+
+### 3. Enhanced Video Metadata Extraction (Phase 2 Enhancement)
+- **Priority**: LOW-MEDIUM
 - **Issue**: Currently only basic file metadata is stored
 - **Tasks**:
   - Extract actual video metadata (duration, resolution, codec info)
@@ -173,8 +198,8 @@ CREATE TABLE search_history (
   - Improve error handling for corrupted video files
   - Enhance UI for video metadata display
 
-### 3. Search Enhancement (Phase 4)
-- **Priority**: LOW (ready for transcripts)
+### 4. Advanced Search Features (Phase 4 Enhancement)
+- **Priority**: LOW (after basic search is fixed)
 - **Issue**: Basic search works but could be enhanced
 - **Tasks**:
   - Implement search result ranking and relevance scoring
@@ -182,13 +207,14 @@ CREATE TABLE search_history (
   - Add advanced search options (time range, specific videos)
   - Optimize search performance for large transcript datasets
 
-### 4. Code Quality Improvements
-- **Priority**: MEDIUM
+### 5. Code Quality & Performance Improvements
+- **Priority**: LOW
 - **Tasks**:
   - Add proper error handling and logging throughout
   - Implement proper TypeScript strict mode compliance
   - Add JSDoc comments for better documentation
   - Refactor inline types in preload.ts (consider moving back to shared types)
+  - Memory usage optimization for large video libraries
 
 ## Technical Considerations
 
@@ -229,6 +255,8 @@ CREATE TABLE search_history (
 
 ## Assessment
 **Infrastructure Status**: ✅ Solid foundation with functional database, UI, and search
-**Core Functionality**: ✅ Complete transcription pipeline working end-to-end
-**Current Focus**: Transcription accuracy optimization and UI/UX polish  
-**Timeline**: App is feature-complete for core functionality, ready for Phase 4+ enhancements
+**Core Functionality**: ✅ Complete transcription pipeline working end-to-end with worker threads
+**Recent Progress**: ✅ Fixed app freezing, duplicate segments, and re-transcription issues
+**Current Focus**: 🚨 Critical search input bug fix, then UI/UX tab implementation
+**Timeline**: App has strong core functionality, needs UX polish to be production-ready
+**Status**: Ready for Phase 4 completion (search + UI improvements)

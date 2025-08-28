@@ -21,6 +21,44 @@ const App: React.FC = () => {
   console.log('🔍 App render - searchResults.length:', searchResults.length);
   console.log('🔍 App render - isSearching:', isSearching);
 
+  // Manual search function - triggered by button click or Enter key
+  const performSearch = async () => {
+    if (!searchQuery.trim()) {
+      console.log('🔍 Empty query, clearing results');
+      setSearchResults([]);
+      return;
+    }
+
+    console.log('🔍 Starting manual search for:', searchQuery);
+    setIsSearching(true);
+    try {
+      console.log('🔍 Calling window.electronAPI.searchVideos with:', searchQuery);
+      const results = await window.electronAPI.searchVideos(searchQuery);
+      console.log('🔍 Search results received:', results);
+      console.log('🔍 Number of results:', results.length);
+      
+      if (results.length > 0) {
+        console.log('🔍 First result details:', results[0]);
+      }
+      
+      setSearchResults(results);
+      console.log('🔍 Search results state updated');
+    } catch (error) {
+      console.error('🔍 Error searching:', error);
+    } finally {
+      console.log('🔍 Setting isSearching to false');
+      setIsSearching(false);
+    }
+  };
+
+  // Handle Enter key press in search input
+  const handleSearchKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      console.log('🔍 Enter key pressed, triggering search');
+      performSearch();
+    }
+  };
+
   // Load existing videos on app start and set up event listeners
   useEffect(() => {
     loadVideos();
@@ -193,16 +231,35 @@ const App: React.FC = () => {
           <div className="search-bar">
             <input
               type="text"
-              placeholder="Search video transcripts..."
+              placeholder="Search video transcripts... (Press Enter or click Search)"
               value={searchQuery}
               onChange={(e) => {
                 console.log('🔍 Input onChange - new value:', e.target.value);
                 setSearchQuery(e.target.value);
-                handleSearch(e.target.value);
               }}
+              onKeyPress={handleSearchKeyPress}
               disabled={isSearching}
             />
-            {isSearching && <span className="search-loading">Searching...</span>}
+            <button 
+              onClick={performSearch}
+              disabled={isSearching || !searchQuery.trim()}
+              className="search-btn"
+            >
+              {isSearching ? 'Searching...' : 'Search'}
+            </button>
+            {searchQuery && (
+              <button 
+                onClick={() => {
+                  setSearchQuery('');
+                  setSearchResults([]);
+                }}
+                disabled={isSearching}
+                className="clear-btn"
+                title="Clear search"
+              >
+                ✕
+              </button>
+            )}
           </div>
 
           {searchResults.length > 0 && (
