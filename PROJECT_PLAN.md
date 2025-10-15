@@ -153,15 +153,116 @@ CREATE TABLE search_history (
 - **User Experience**: Add transcription cancellation, batch processing UI
 
 ### 🔄 Phase 4: Search Implementation & UI Polish (IN PROGRESS)
-**Status**: Infrastructure complete, FTS5 search working with real transcript data
+**Status**: Infrastructure complete, FTS5 search working with real transcript data, search UX improved
 
-#### 🐛 **Critical Issue Identified**
-- **Search Input Bug**: Search triggers on every keystroke causing focus loss and poor UX
-- **Priority**: CRITICAL - Must fix immediately for app usability
+#### ✅ **Recently Completed**
+- ✅ **Search UX Improvements**: Fixed search input focus loss with debounced search
+- ✅ **Search Functionality**: Real-time search working with FTS5 database
 
-#### 📋 **Planned UI Improvements**
-- **Tab-Based Interface**: Separate views for current folder vs all transcribed videos
+#### 🐛 **Critical Issues Identified**
+- **Folder Selection Bug**: Selected folder doesn't persist properly between app sessions
+- **Video Display Confusion**: Current view mixes all database videos with current folder videos
+- **UX Organization**: Single view lacks clear separation between "all videos" vs "current folder"
+
+#### 📋 **Current Implementation Analysis**
+**Current Behavior**:
+- App startup: Shows ALL videos from database (mixed sources)
+- Folder selection: Replaces entire video list with only current folder videos
+- No clear distinction between "transcribed videos" vs "current folder videos"
+- Selected folder stored in localStorage but not properly utilized
+
+**Root Cause**: The app lacks proper state management to distinguish between:
+1. **All transcribed videos** (from any folder, stored in database)
+2. **Current folder videos** (mix of transcribed + un-transcribed from selected folder)
+
+#### 🎯 **Phase 4.2: Tab-Based Navigation Implementation (NEXT PRIORITY)**
+
+**Objective**: Implement clear separation between video sources with tab-based interface
+
+**Proposed Tab Structure**:
+- **Tab 1**: "All Videos" - Shows all videos in database (transcribed + un-transcribed from any folder)
+- **Tab 2**: "Current Folder" - Shows videos from the most recently selected folder (mix of transcribed + un-transcribed)
+
+**Implementation Steps**:
+
+1. **Step 1: Fix Folder Selection Persistence (CRITICAL)**
+   - **Issue**: Selected folder not properly restored on app startup
+   - **Solution**: 
+     - Properly restore selected folder from localStorage on app startup
+     - Add folder path display in UI
+     - Implement "Change Folder" button functionality
+   - **Priority**: HIGH - Must fix before tab implementation
+
+2. **Step 2: Implement Tab Navigation System**
+   - **New State Management**:
+     - `activeTab: 'all' | 'current-folder'`
+     - `currentFolderPath: string | null`
+     - Separate video lists for each tab
+   - **UI Components**:
+     - Tab navigation bar
+     - Tab-specific video lists
+     - Folder selection controls in "Current Folder" tab
+   - **Priority**: MEDIUM
+
+3. **Step 3: Enhanced Video Filtering & Display**
+   - **Tab 1 - "All Videos"**:
+     - Show all videos from database
+     - Filter by transcription status
+     - Search across all videos
+   - **Tab 2 - "Current Folder"**:
+     - Show videos from selected folder only
+     - Clear indication of transcription status
+     - "Change Folder" button
+     - Folder path display
+   - **Priority**: MEDIUM
+
+4. **Step 4: Improved Folder Management**
+   - **Folder Selection UX**:
+     - Clear current folder display
+     - Easy folder changing
+     - Folder validation and error handling
+   - **Database Integration**:
+     - Track folder associations for videos
+     - Support multiple folder sources
+   - **Priority**: LOW
+
+**Technical Implementation Details**:
+
+```typescript
+// New state structure
+interface AppState {
+  activeTab: 'all' | 'current-folder';
+  allVideos: VideoFile[];
+  currentFolderVideos: VideoFile[];
+  currentFolderPath: string | null;
+  // ... existing state
+}
+
+// New database methods needed
+interface VideoDatabase {
+  getVideosByFolder(folderPath: string): VideoFile[];
+  updateVideoFolder(videoId: number, folderPath: string): void;
+}
+```
+
+**Benefits of This Approach**:
+1. **Clear Separation**: Users understand what they're viewing
+2. **Better Organization**: Logical grouping of video sources
+3. **Improved UX**: Intuitive navigation between different video sets
+4. **Future Extensibility**: Easy to add more tabs (e.g., "Recent", "Favorites")
+
+**Success Criteria**:
+- ✅ Users can clearly distinguish between "all videos" and "current folder"
+- ✅ Selected folder persists properly between app sessions
+- ✅ Tab navigation is intuitive and responsive
+- ✅ Search works appropriately for each tab context
+- ✅ Folder selection is clear and functional
+
+#### 📋 **Planned UI Improvements** (After Tab Implementation)
 - **Enhanced Navigation**: Better organization and video library management
+- **Video Metadata Display**: Improved video information presentation
+- **Bulk Operations**: Select multiple videos for batch transcription
+- **Advanced Filtering**: Filter by date, size, transcription status
 
 ### 📋 Phase 5: Video Player Integration (PLANNED)
 ### 📋 Phase 6: UI/UX Polish (PLANNED)  
@@ -170,24 +271,25 @@ CREATE TABLE search_history (
 
 ## Next Steps (Critical Priorities)
 
-### 1. 🚨 Fix Search Input Bug (Phase 4 - CRITICAL)
+### 1. 🚨 Fix Folder Selection Persistence (Phase 4.2 - CRITICAL)
 - **Priority**: HIGH - **BLOCKING UX ISSUE**
-- **Issue**: Search input loses focus on every keystroke due to immediate `handleSearch()` calls
+- **Issue**: Selected folder doesn't persist properly between app sessions, causing confusion
 - **Tasks**:
-  - Implement debounced search (300ms delay after typing stops)
-  - Fix onChange handler to prevent focus loss
-  - Improve search UX with proper loading states
-  - Test search functionality thoroughly
+  - Properly restore selected folder from localStorage on app startup
+  - Add folder path display in UI to show current folder
+  - Implement "Change Folder" button functionality
+  - Test folder selection persistence thoroughly
 
-### 2. 🎨 UI Tab Implementation (Phase 4 - UX Enhancement)
-- **Priority**: MEDIUM
-- **Issue**: Current single-view interface lacks organization
+### 2. 🎨 Implement Tab-Based Navigation (Phase 4.2 - UX Enhancement)
+- **Priority**: HIGH
+- **Issue**: Current single-view interface mixes all videos with current folder videos
 - **Tasks**:
-  - Create tab-based navigation system
-  - **Tab 1**: Current folder videos (filtered view)
-  - **Tab 2**: All transcribed videos (master library)
-  - Implement proper routing/state management between tabs
-  - Enhance video display and filtering options
+  - Create tab-based navigation system with two tabs:
+    - **Tab 1**: "All Videos" - All videos in database (transcribed + un-transcribed from any folder)
+    - **Tab 2**: "Current Folder" - Videos from selected folder only
+  - Implement proper state management for separate video lists
+  - Add tab-specific search and filtering
+  - Enhance video display with clear source indication
 
 ### 3. Enhanced Video Metadata Extraction (Phase 2 Enhancement)
 - **Priority**: LOW-MEDIUM
