@@ -85,20 +85,30 @@ export class TranscriptionOrchestrator extends EventEmitter {
    * Process a transcription job
    */
   async processTranscriptionJob(job: TranscriptionJob, options: TranscriptionOptions = {}): Promise<void> {
-    const { videoId, videoPath } = job;
+    const { videoId, videoPath, abortController } = job;
     
     try {
+      // Check for cancellation at start
+      if (abortController?.signal.aborted) {
+        throw new Error('Job was cancelled before processing started');
+      }
+
       // Check if this is a re-transcription BEFORE changing status
       const videos = this.database.getAllVideos();
       const video = videos.find(v => v.id === videoId);
       const isRetranscribe = video?.transcriptionStatus === 'completed';
-      
+
       console.log(`${isRetranscribe ? '🔄 Re-transcribing' : '🎬 Starting transcription for'} video ${videoId}: ${videoPath}`);
-      
+
       // Clear existing transcript segments for re-transcription
       if (isRetranscribe) {
         console.log(`🧹 Clearing existing transcript segments for video ${videoId}`);
         this.database.clearTranscriptSegments(videoId);
+      }
+
+      // Check for cancellation after clearing segments
+      if (abortController?.signal.aborted) {
+        throw new Error('Job was cancelled during setup');
       }
 
       // Now update status to processing (after checking and clearing)
@@ -114,11 +124,17 @@ export class TranscriptionOrchestrator extends EventEmitter {
 
       const audioResult = await this.audioExtractor.extractAudio(videoPath, videoId, {
         outputFormat: options.audioFormat || 'wav',
-        sampleRate: options.sampleRate || 16000
+        sampleRate: options.sampleRate || 16000,
+        abortSignal: abortController?.signal
       });
 
       if (!audioResult.success) {
         throw new Error(`Audio extraction failed: ${audioResult.error}`);
+      }
+
+      // Check for cancellation after audio extraction
+      if (abortController?.signal.aborted) {
+        throw new Error('Job was cancelled after audio extraction');
       }
 
       this.emit('progress', {
@@ -140,12 +156,18 @@ export class TranscriptionOrchestrator extends EventEmitter {
         audioResult.outputPath!,
         {
           model: options.model,
-          language: options.language
+          language: options.language,
+          abortSignal: abortController?.signal
         }
       );
 
       if (!transcriptionResult.success) {
         throw new Error(`Transcription failed: ${transcriptionResult.error}`);
+      }
+
+      // Check for cancellation after transcription
+      if (abortController?.signal.aborted) {
+        throw new Error('Job was cancelled after transcription');
       }
 
       this.emit('progress', {
@@ -190,14 +212,25 @@ export class TranscriptionOrchestrator extends EventEmitter {
       console.log(`✅ Transcription completed for video ${videoId}: ${dbSegments.length} segments`);
 
     } catch (error) {
-      console.error(`❌ Transcription failed for video ${videoId}:`, error);
-      
-      // Update database status
-      this.database.updateVideoTranscriptionStatus(videoId, 'failed');
-      
+      console.error(`❌ Transcription error for video ${videoId}:`, error);
+
+      // Check if this was a cancellation
+      if (abortController?.signal.aborted || (error instanceof Error && error.message.includes('cancelled'))) {
+        console.log(`🛑 Transcription cancelled for video ${videoId}`);
+
+        // Reset video status to pending on cancellation
+        this.database.updateVideoTranscriptionStatus(videoId, 'pending');
+
+        // Clean up any partial data
+        this.database.clearTranscriptSegments(videoId);
+      } else {
+        // Regular failure
+        this.database.updateVideoTranscriptionStatus(videoId, 'failed');
+      }
+
       // Clean up audio file
       this.audioExtractor.cleanupAudio(videoId);
-      
+
       throw error;
     } finally {
       // Always clean up audio file
@@ -257,6 +290,13 @@ export class TranscriptionOrchestrator extends EventEmitter {
   }
 
   /**
+   * Cancel a job (either queued or processing)
+   */
+  cancelJob(jobId: string): boolean {
+    return this.queue.cancelJob(jobId);
+  }
+
+  /**
    * Clear completed jobs
    */
   clearCompletedJobs(): number {
@@ -306,6 +346,10 @@ export class TranscriptionOrchestrator extends EventEmitter {
 
     this.queue.on('jobFailed', (job: TranscriptionJob) => {
       this.emit('jobFailed', job);
+    });
+
+    this.queue.on('jobCancelled', (job: TranscriptionJob) => {
+      this.emit('jobCancelled', job);
     });
 
     this.queue.on('jobProgress', (progress: any) => {

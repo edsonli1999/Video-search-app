@@ -7,6 +7,7 @@ export interface AudioExtractionOptions {
   outputFormat?: 'wav' | 'mp3';
   sampleRate?: number;
   channels?: number;
+  abortSignal?: AbortSignal;
 }
 
 export interface AudioExtractionResult {
@@ -78,7 +79,8 @@ export class AudioExtractor {
     const {
       outputFormat = 'wav',
       sampleRate = 16000,
-      channels = 1
+      channels = 1,
+      abortSignal
     } = options;
 
     const outputPath = path.join(this.tempDir, `${videoId}.${outputFormat}`);
@@ -90,6 +92,15 @@ export class AudioExtractor {
 
     return new Promise((resolve) => {
       try {
+        // Check for cancellation at start
+        if (abortSignal?.aborted) {
+          resolve({
+            success: false,
+            error: 'Audio extraction was cancelled'
+          });
+          return;
+        }
+
         // Ensure FFmpeg is configured
         if (!this.isConfigured) {
           this.configureFFmpeg();
@@ -113,7 +124,7 @@ export class AudioExtractor {
 
         console.log(`🎵 AudioExtractor: Starting FFmpeg processing...`);
 
-        ffmpeg(videoPath)
+        const ffmpegProcess = ffmpeg(videoPath)
           .audioFrequency(sampleRate)
           .audioChannels(channels)
           .audioCodec(outputFormat === 'wav' ? 'pcm_s16le' : 'libmp3lame')
@@ -171,8 +182,25 @@ export class AudioExtractor {
           .on('codecData', (data: any) => {
             duration = parseFloat(data.duration) || 0;
             console.log(`🎵 AudioExtractor: Detected video duration: ${duration}s`);
-          })
-          .run();
+          });
+
+        // Set up cancellation listener
+        if (abortSignal) {
+          abortSignal.addEventListener('abort', () => {
+            console.log(`🛑 AudioExtractor: Cancelling FFmpeg process for video ${videoId}`);
+            try {
+              ffmpegProcess.kill('SIGTERM');
+            } catch (err) {
+              console.log(`🎵 AudioExtractor: Error killing FFmpeg process:`, err);
+            }
+            resolve({
+              success: false,
+              error: 'Audio extraction was cancelled'
+            });
+          });
+        }
+
+        ffmpegProcess.run();
           
       } catch (error) {
         console.error(`❌ AudioExtractor: Native audio extraction error for video ${videoId}:`, error);

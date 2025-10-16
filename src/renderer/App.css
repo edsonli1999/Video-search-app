@@ -464,6 +464,80 @@
   background-color: #229954;
 }
 
+/* Progress indicators and cancel button */
+.cancel-btn {
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background-color 0.2s;
+  white-space: nowrap;
+}
+
+.cancel-btn:hover {
+  background-color: #c0392b;
+}
+
+.progress-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.progress-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.progress-stage {
+  font-weight: bold;
+  color: #2c3e50;
+  font-size: 0.9rem;
+  text-transform: capitalize;
+}
+
+.progress-message {
+  color: #7f8c8d;
+  font-size: 0.8rem;
+}
+
+.progress-bar-container {
+  position: relative;
+  width: 100%;
+  height: 20px;
+  background-color: #ecf0f1;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.progress-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #3498db 0%, #2980b9 100%);
+  border-radius: 10px;
+  transition: width 0.3s ease;
+  min-width: 2px;
+}
+
+.progress-text {
+  position: relative;
+  z-index: 1;
+  font-size: 0.75rem;
+  font-weight: bold;
+  color: #2c3e50;
+  text-shadow: 0 0 3px rgba(255, 255, 255, 0.8);
+}
+
 /* Responsive design */
 @media (max-width: 768px) {
   .app-header {
@@ -483,6 +557,10 @@
   .video-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .progress-section {
+    width: 100%;
   }
 
   .search-bar {

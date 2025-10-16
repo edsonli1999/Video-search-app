@@ -4,7 +4,7 @@ export interface TranscriptionJob {
   id: string;
   videoId: number;
   videoPath: string;
-  status: 'queued' | 'processing' | 'completed' | 'failed';
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
   priority: number;
   createdAt: Date;
   startedAt?: Date;
@@ -12,6 +12,7 @@ export interface TranscriptionJob {
   error?: string;
   progress?: number;
   stage?: string;
+  abortController?: AbortController;
 }
 
 export interface QueueStatus {
@@ -20,6 +21,7 @@ export interface QueueStatus {
   processingJobs: number;
   completedJobs: number;
   failedJobs: number;
+  cancelledJobs: number;
 }
 
 export class TranscriptionQueue extends EventEmitter {
@@ -85,6 +87,46 @@ export class TranscriptionQueue extends EventEmitter {
   }
 
   /**
+   * Cancel a job (either queued or processing)
+   */
+  cancelJob(jobId: string): boolean {
+    // Check if it's a queued job
+    const queuedIndex = this.queue.findIndex(job => job.id === jobId);
+    if (queuedIndex !== -1) {
+      const job = this.queue[queuedIndex];
+      job.status = 'cancelled';
+      job.completedAt = new Date();
+      this.queue.splice(queuedIndex, 1);
+
+      console.log(`❌ Cancelled queued transcription job ${jobId}`);
+      this.emit('jobCancelled', job);
+      this.emit('queueUpdated', this.getStatus());
+      return true;
+    }
+
+    // Check if it's the currently processing job
+    if (this.processing && this.processing.id === jobId) {
+      const job = this.processing;
+
+      // Abort the operation if AbortController is available
+      if (job.abortController) {
+        job.abortController.abort();
+        console.log(`🛑 Sending abort signal to job ${jobId}`);
+      }
+
+      job.status = 'cancelled';
+      job.completedAt = new Date();
+
+      console.log(`❌ Cancelled processing transcription job ${jobId}`);
+      this.emit('jobCancelled', job);
+      // Note: Don't emit queueUpdated here - let processNextJob handle cleanup
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Get job status by job ID
    */
   getJobStatus(jobId: string): TranscriptionJob | null {
@@ -126,13 +168,14 @@ export class TranscriptionQueue extends EventEmitter {
    */
   getStatus(): QueueStatus {
     const allJobs = this.getAllJobs();
-    
+
     return {
       totalJobs: allJobs.length,
       queuedJobs: allJobs.filter(job => job.status === 'queued').length,
       processingJobs: allJobs.filter(job => job.status === 'processing').length,
       completedJobs: allJobs.filter(job => job.status === 'completed').length,
-      failedJobs: allJobs.filter(job => job.status === 'failed').length
+      failedJobs: allJobs.filter(job => job.status === 'failed').length,
+      cancelledJobs: allJobs.filter(job => job.status === 'cancelled').length
     };
   }
 
@@ -179,10 +222,11 @@ export class TranscriptionQueue extends EventEmitter {
     this.isProcessing = true;
     const job = this.queue.shift()!;
     this.processing = job;
-    
+
     job.status = 'processing';
     job.startedAt = new Date();
-    
+    job.abortController = new AbortController(); // Create abort controller
+
     console.log(`🔄 Processing transcription job ${job.id} for video ${job.videoId}`);
     this.emit('jobStarted', job);
     this.emit('queueUpdated', this.getStatus());
@@ -212,18 +256,26 @@ export class TranscriptionQueue extends EventEmitter {
       this.emit('jobCompleted', job);
       
     } catch (error) {
-      job.status = 'failed';
-      job.completedAt = new Date();
-      job.error = error instanceof Error ? error.message : String(error);
-      
-      console.error(`❌ Failed transcription job ${job.id} for video ${job.videoId}:`, error);
-      this.emit('jobFailed', job);
+      // Check if this was a cancellation
+      if (job.abortController?.signal.aborted) {
+        job.status = 'cancelled';
+        job.completedAt = new Date();
+        console.log(`🛑 Transcription job ${job.id} was cancelled`);
+        this.emit('jobCancelled', job);
+      } else {
+        job.status = 'failed';
+        job.completedAt = new Date();
+        job.error = error instanceof Error ? error.message : String(error);
+
+        console.error(`❌ Failed transcription job ${job.id} for video ${job.videoId}:`, error);
+        this.emit('jobFailed', job);
+      }
     } finally {
       this.processing = null;
       this.isProcessing = false;
       this.emit('queueUpdated', this.getStatus());
-      
-      // Process next job if available
+
+      // Process next job if available and not cancelled
       if (this.queue.length > 0) {
         setTimeout(() => this.processNextJob(), 100);
       }

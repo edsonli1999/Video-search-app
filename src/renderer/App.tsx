@@ -2,6 +2,25 @@ import React, { useState, useEffect } from 'react';
 import { VideoFile, SearchResult, TranscriptSegment } from '../shared/types';
 import './App.css';
 
+// Extended types for the electron API with new methods
+declare global {
+  interface Window {
+    electronAPI: {
+      selectFolder: () => Promise<string | null>;
+      scanVideos: (folderPath: string) => Promise<VideoFile[]>;
+      getVideos: () => Promise<VideoFile[]>;
+      transcribeVideo: (videoId: number) => Promise<{ success: boolean; message: string }>;
+      cancelTranscription: (videoId: number) => Promise<{ success: boolean; message: string }>;
+      searchVideos: (query: string) => Promise<SearchResult[]>;
+      getTranscript: (videoId: number) => Promise<TranscriptSegment[]>;
+      onTranscriptionCompleted: (callback: (data: { videoId: number; jobId: string }) => void) => void;
+      onTranscriptionFailed: (callback: (data: { videoId: number; jobId: string; error: string }) => void) => void;
+      onTranscriptionCancelled: (callback: (data: { videoId: number; jobId: string }) => void) => void;
+      onTranscriptionProgress: (callback: (data: { videoId: number; stage: string; progress: number; message: string }) => void) => void;
+    };
+  }
+}
+
 const App: React.FC = () => {
   const [videos, setVideos] = useState<VideoFile[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(() => {
@@ -15,6 +34,29 @@ const App: React.FC = () => {
   const [currentVideo, setCurrentVideo] = useState<VideoFile | null>(null);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
   const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
+
+  // Progress tracking state
+  const [transcriptionProgress, setTranscriptionProgress] = useState<{
+    [videoId: number]: {
+      stage: string;
+      progress: number;
+      message: string;
+    }
+  }>({});
+
+  // Helper function to get stage display name
+  const getStageDisplayName = (stage: string): string => {
+    switch (stage) {
+      case 'audio_extraction':
+        return 'Extracting Audio';
+      case 'transcription':
+        return 'Transcribing';
+      case 'database_storage':
+        return 'Saving Results';
+      default:
+        return stage.charAt(0).toUpperCase() + stage.slice(1);
+    }
+  };
 
   console.log('🔍 App render - searchQuery:', searchQuery);
   console.log('🔍 App render - searchResults:', searchResults);
@@ -66,12 +108,47 @@ const App: React.FC = () => {
     // Listen for transcription completion events
     window.electronAPI.onTranscriptionCompleted((data) => {
       console.log(`🎉 Frontend: Transcription completed for video ${data.videoId}`);
+      // Clear progress on completion
+      setTranscriptionProgress(prev => {
+        const updated = { ...prev };
+        delete updated[data.videoId];
+        return updated;
+      });
       loadVideos(); // Reload videos to update status
     });
     
     window.electronAPI.onTranscriptionFailed((data) => {
       console.log(`❌ Frontend: Transcription failed for video ${data.videoId}:`, data.error);
+      // Clear progress on failure
+      setTranscriptionProgress(prev => {
+        const updated = { ...prev };
+        delete updated[data.videoId];
+        return updated;
+      });
       loadVideos(); // Reload videos to update status
+    });
+
+    window.electronAPI.onTranscriptionCancelled((data) => {
+      console.log(`🛑 Frontend: Transcription cancelled for video ${data.videoId}`);
+      // Clear progress on cancellation
+      setTranscriptionProgress(prev => {
+        const updated = { ...prev };
+        delete updated[data.videoId];
+        return updated;
+      });
+      loadVideos(); // Reload videos to update status
+    });
+
+    window.electronAPI.onTranscriptionProgress((data) => {
+      console.log(`📊 Frontend: Progress update for video ${data.videoId}: ${data.stage} - ${data.progress}%`);
+      setTranscriptionProgress(prev => ({
+        ...prev,
+        [data.videoId]: {
+          stage: data.stage,
+          progress: data.progress,
+          message: data.message
+        }
+      }));
     });
   }, []);
 
@@ -164,9 +241,33 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Error transcribing video:', error);
       // Revert status on error
-      setVideos(prev => prev.map(v => 
+      setVideos(prev => prev.map(v =>
         v.id === video.id ? { ...v, transcriptionStatus: 'failed' } : v
       ));
+    }
+  };
+
+  const handleCancelTranscription = async (video: VideoFile) => {
+    if (!video.id) return;
+
+    try {
+      console.log(`🛑 Cancelling transcription for video ${video.id}: ${video.fileName}`);
+
+      const result = await window.electronAPI.cancelTranscription(video.id);
+
+      if (result.success) {
+        console.log(`🛑 Frontend: Cancellation request sent for video ${video.id}`);
+        // Clear progress immediately for better UX
+        setTranscriptionProgress(prev => {
+          const updated = { ...prev };
+          if (video.id) {
+            delete updated[video.id];
+          }
+          return updated;
+        });
+      }
+    } catch (error) {
+      console.error('Error cancelling transcription:', error);
     }
   };
 
@@ -302,19 +403,54 @@ const App: React.FC = () => {
                 </div>
                 
                 <div className="video-actions">
-                  <div className={`status status-${video.transcriptionStatus}`}>
-                    {video.transcriptionStatus}
-                  </div>
-                  
-                  {video.transcriptionStatus === 'pending' && (
-                    <button 
-                      onClick={() => handleTranscribeVideo(video)}
-                      className="transcribe-btn"
-                    >
-                      Transcribe
-                    </button>
+                  {video.transcriptionStatus === 'processing' && video.id && transcriptionProgress[video.id] ? (
+                    <div className="progress-section">
+                      <div className="progress-info">
+                        <div className="progress-stage">{getStageDisplayName(transcriptionProgress[video.id].stage)}</div>
+                        <div className="progress-message">{transcriptionProgress[video.id].message}</div>
+                      </div>
+                      <div className="progress-bar-container">
+                        <div
+                          className="progress-bar"
+                          style={{ width: `${transcriptionProgress[video.id].progress}%` }}
+                        />
+                        <span className="progress-text">{Math.round(transcriptionProgress[video.id].progress)}%</span>
+                      </div>
+                      <button
+                        onClick={() => handleCancelTranscription(video)}
+                        className="cancel-btn"
+                        title="Cancel transcription"
+                      >
+                        🛑 Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className={`status status-${video.transcriptionStatus}`}>
+                        {video.transcriptionStatus}
+                      </div>
+
+                      {video.transcriptionStatus === 'pending' && (
+                        <button
+                          onClick={() => handleTranscribeVideo(video)}
+                          className="transcribe-btn"
+                        >
+                          Transcribe
+                        </button>
+                      )}
+
+                      {video.transcriptionStatus === 'processing' && (
+                        <button
+                          onClick={() => handleCancelTranscription(video)}
+                          className="cancel-btn"
+                          title="Cancel transcription"
+                        >
+                          🛑 Cancel
+                        </button>
+                      )}
+                    </>
                   )}
-                  
+
                   {video.transcriptionStatus === 'completed' && (
                     <div className="completed-actions">
                       <button 

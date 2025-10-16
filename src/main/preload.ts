@@ -36,9 +36,12 @@ const IPC_CHANNELS = {
   SEARCH_VIDEOS: 'search-videos',
   GET_VIDEOS: 'get-videos',
   TRANSCRIBE_VIDEO: 'transcribe-video',
+  CANCEL_TRANSCRIPTION: 'cancel-transcription',
   GET_TRANSCRIPT: 'get-transcript',
   TRANSCRIPTION_COMPLETED: 'transcription-completed',
   TRANSCRIPTION_FAILED: 'transcription-failed',
+  TRANSCRIPTION_CANCELLED: 'transcription-cancelled',
+  TRANSCRIPTION_PROGRESS: 'transcription-progress',
 } as const;
 
 // Expose protected methods that allow the renderer process to use
@@ -55,8 +58,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getVideos: (): Promise<VideoFile[]> => 
     ipcRenderer.invoke(IPC_CHANNELS.GET_VIDEOS),
 
-  transcribeVideo: (videoId: number): Promise<{ success: boolean; message: string }> => 
+  transcribeVideo: (videoId: number): Promise<{ success: boolean; message: string }> =>
     ipcRenderer.invoke(IPC_CHANNELS.TRANSCRIBE_VIDEO, videoId),
+
+  cancelTranscription: (videoId: number): Promise<{ success: boolean; message: string }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANCEL_TRANSCRIPTION, videoId),
 
   // Search operations
   searchVideos: (query: string): Promise<SearchResult[]> => 
@@ -72,6 +78,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onTranscriptionFailed: (callback: (data: { videoId: number; jobId: string; error: string }) => void) => {
     ipcRenderer.on(IPC_CHANNELS.TRANSCRIPTION_FAILED, (event, data) => callback(data));
   },
+
+  onTranscriptionCancelled: (callback: (data: { videoId: number; jobId: string }) => void) => {
+    ipcRenderer.on(IPC_CHANNELS.TRANSCRIPTION_CANCELLED, (event, data) => callback(data));
+  },
+
+  onTranscriptionProgress: (callback: (data: { videoId: number; stage: string; progress: number; message: string }) => void) => {
+    ipcRenderer.on(IPC_CHANNELS.TRANSCRIPTION_PROGRESS, (event, data) => callback(data));
+  },
 });
 
 // Type definitions for the exposed API
@@ -82,10 +96,13 @@ declare global {
       scanVideos: (folderPath: string) => Promise<VideoFile[]>;
       getVideos: () => Promise<VideoFile[]>;
       transcribeVideo: (videoId: number) => Promise<{ success: boolean; message: string }>;
+      cancelTranscription: (videoId: number) => Promise<{ success: boolean; message: string }>;
       searchVideos: (query: string) => Promise<SearchResult[]>;
       getTranscript: (videoId: number) => Promise<TranscriptSegment[]>;
       onTranscriptionCompleted: (callback: (data: { videoId: number; jobId: string }) => void) => void;
       onTranscriptionFailed: (callback: (data: { videoId: number; jobId: string; error: string }) => void) => void;
+      onTranscriptionCancelled: (callback: (data: { videoId: number; jobId: string }) => void) => void;
+      onTranscriptionProgress: (callback: (data: { videoId: number; stage: string; progress: number; message: string }) => void) => void;
     };
   }
 }

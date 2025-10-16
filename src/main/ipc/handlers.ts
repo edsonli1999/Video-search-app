@@ -28,6 +28,18 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       error: job.error
     });
   });
+
+  transcriptionOrchestrator.on('jobCancelled', (job) => {
+    console.log(`📡 IPC: Notifying frontend that job ${job.id} was cancelled for video ${job.videoId}`);
+    mainWindow.webContents.send(IPC_CHANNELS.TRANSCRIPTION_CANCELLED, {
+      videoId: job.videoId,
+      jobId: job.id
+    });
+  });
+
+  transcriptionOrchestrator.on('progress', (progressData) => {
+    mainWindow.webContents.send(IPC_CHANNELS.TRANSCRIPTION_PROGRESS, progressData);
+  });
   // Handle folder selection
   ipcMain.handle(IPC_CHANNELS.SELECT_FOLDER, async () => {
     try {
@@ -144,6 +156,44 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     } catch (error) {
       console.error('❌ IPC: Error queuing transcription:', error);
       db.updateVideoTranscriptionStatus(videoId, 'failed');
+      throw error;
+    }
+  });
+
+  // Handle transcription cancellation
+  ipcMain.handle(IPC_CHANNELS.CANCEL_TRANSCRIPTION, async (event, videoId: number) => {
+    try {
+      console.log(`🛑 IPC: Cancellation request received for video ${videoId}`);
+
+      // Find the job for this video
+      const job = transcriptionOrchestrator.getJobByVideoId(videoId);
+      if (!job) {
+        console.log(`⚠️ IPC: No active job found for video ${videoId}`);
+        return {
+          success: false,
+          message: 'No active transcription job found for this video'
+        };
+      }
+
+      // Cancel the job
+      const cancelled = transcriptionOrchestrator.cancelJob(job.id);
+
+      if (cancelled) {
+        console.log(`🛑 IPC: Successfully cancelled job ${job.id} for video ${videoId}`);
+        return {
+          success: true,
+          message: 'Transcription cancelled successfully',
+          jobId: job.id
+        };
+      } else {
+        console.log(`⚠️ IPC: Failed to cancel job ${job.id} for video ${videoId}`);
+        return {
+          success: false,
+          message: 'Failed to cancel transcription job'
+        };
+      }
+    } catch (error) {
+      console.error('❌ IPC: Error cancelling transcription:', error);
       throw error;
     }
   });

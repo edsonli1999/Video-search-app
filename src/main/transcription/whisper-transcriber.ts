@@ -22,6 +22,7 @@ export interface TranscriptionOptions {
   task?: 'transcribe' | 'translate';
   chunkLength?: number;
   strideLength?: number;
+  abortSignal?: AbortSignal;
 }
 
 export class WhisperTranscriber extends EventEmitter {
@@ -141,8 +142,19 @@ export class WhisperTranscriber extends EventEmitter {
     options: TranscriptionOptions = {}
   ): Promise<TranscriptionResult> {
     console.log(`🎤 Starting worker-based transcription: ${audioPath}`);
-    
+
+    const { abortSignal } = options;
+
     return new Promise((resolve, reject) => {
+      // Check for cancellation at start
+      if (abortSignal?.aborted) {
+        resolve({
+          success: false,
+          error: 'Transcription was cancelled'
+        });
+        return;
+      }
+
       // Ensure worker is created
       this.createWorker();
 
@@ -187,6 +199,28 @@ export class WhisperTranscriber extends EventEmitter {
 
       this.on('transcription-result', handleResult);
       this.on('transcription-error', handleError);
+
+      // Set up cancellation listener
+      if (abortSignal) {
+        abortSignal.addEventListener('abort', () => {
+          console.log(`🛑 WhisperTranscriber: Cancelling transcription`);
+          clearTimeout(timeout);
+          this.removeListener('transcription-result', handleResult);
+          this.removeListener('transcription-error', handleError);
+
+          // Send cancel message to worker
+          if (this.worker) {
+            this.worker.postMessage({
+              type: 'cancel'
+            });
+          }
+
+          resolve({
+            success: false,
+            error: 'Transcription was cancelled'
+          });
+        });
+      }
 
       // Send transcription request to worker
       this.worker.postMessage({
