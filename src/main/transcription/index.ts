@@ -114,19 +114,39 @@ export class TranscriptionOrchestrator extends EventEmitter {
       // Now update status to processing (after checking and clearing)
       this.database.updateVideoTranscriptionStatus(videoId, 'processing');
 
-      // Stage 1: Audio Extraction (0-30%)
+      // Stage 1: Audio Extraction (0-30% of overall progress)
       this.emit('progress', {
         videoId,
         stage: 'audio_extraction',
         progress: 0,
-        message: 'Extracting audio from video...'
+        message: 'Starting audio extraction...'
       });
+
+      // Listen to audio extraction progress
+      const audioProgressHandler = (percent: number) => {
+        // Map audio extraction progress to 0-30% of overall progress
+        const overallProgress = Math.round(percent * 0.3);
+        this.emit('progress', {
+          videoId,
+          stage: 'audio_extraction',
+          progress: overallProgress,
+          message: `Extracting audio: ${percent.toFixed(1)}%`
+        });
+      };
+
+      this.audioExtractor.on('progress', audioProgressHandler);
 
       const audioResult = await this.audioExtractor.extractAudio(videoPath, videoId, {
         outputFormat: options.audioFormat || 'wav',
         sampleRate: options.sampleRate || 16000,
-        abortSignal: abortController?.signal
+        abortSignal: abortController?.signal,
+        onProgress: (percent) => {
+          // Additional progress handling if needed
+        }
       });
+
+      // Remove the listener after extraction
+      this.audioExtractor.removeListener('progress', audioProgressHandler);
 
       if (!audioResult.success) {
         throw new Error(`Audio extraction failed: ${audioResult.error}`);
@@ -140,17 +160,39 @@ export class TranscriptionOrchestrator extends EventEmitter {
       this.emit('progress', {
         videoId,
         stage: 'audio_extraction',
-        progress: 100,
+        progress: 30,
         message: 'Audio extraction completed'
       });
 
-      // Stage 2: Transcription (30-90%)
+      // Stage 2: Transcription (30-90% of overall progress)
       this.emit('progress', {
         videoId,
         stage: 'transcription',
-        progress: 0,
-        message: 'Transcribing audio with Whisper...'
+        progress: 30,
+        message: 'Starting transcription with Whisper...'
       });
+
+      // Listen to whisper progress events
+      const whisperProgressHandler = (progressData: any) => {
+        // Map whisper progress (0-100) to 30-90% of overall progress
+        let whisperPercent = 0;
+        
+        if (progressData.stage === 'transcribing' && typeof progressData.progress === 'number') {
+          whisperPercent = progressData.progress;
+        } else if (progressData.stage === 'model-loaded') {
+          whisperPercent = 10; // Model loading is about 10% of transcription
+        }
+        
+        const overallProgress = Math.round(30 + (whisperPercent * 0.6));
+        this.emit('progress', {
+          videoId,
+          stage: 'transcription',
+          progress: overallProgress,
+          message: progressData.message || `Transcribing: ${whisperPercent}%`
+        });
+      };
+
+      this.whisperTranscriber.on('progress', whisperProgressHandler);
 
       const transcriptionResult = await this.whisperTranscriber.transcribeAudio(
         audioResult.outputPath!,
@@ -160,6 +202,9 @@ export class TranscriptionOrchestrator extends EventEmitter {
           abortSignal: abortController?.signal
         }
       );
+
+      // Remove the listener after transcription
+      this.whisperTranscriber.removeListener('progress', whisperProgressHandler);
 
       if (!transcriptionResult.success) {
         throw new Error(`Transcription failed: ${transcriptionResult.error}`);
@@ -173,31 +218,66 @@ export class TranscriptionOrchestrator extends EventEmitter {
       this.emit('progress', {
         videoId,
         stage: 'transcription',
-        progress: 100,
+        progress: 90,
         message: 'Transcription completed'
       });
 
-      // Stage 3: Database Storage (90-100%)
+      // Stage 3: Database Storage (90-100% of overall progress)
       this.emit('progress', {
         videoId,
         stage: 'database_storage',
-        progress: 0,
+        progress: 90,
         message: 'Storing transcript in database...'
       });
 
-      // Handle transcription results (including 0 segments case)
+      // Handle transcription results with validation
       const segments = transcriptionResult.segments || [];
-      const dbSegments = segments.map(segment => ({
-        startTime: segment.start,
-        endTime: segment.end,
-        text: segment.text,
-        confidence: segment.confidence
-      }));
+      
+      // Validate and fix segments before database insertion
+      const dbSegments = segments
+        .filter(segment => {
+          // Ensure all required fields are present and valid
+          const hasValidTimes = typeof segment.start === 'number' && 
+                               typeof segment.end === 'number' &&
+                               !isNaN(segment.start) && 
+                               !isNaN(segment.end) &&
+                               segment.end > segment.start;
+          
+          const hasText = segment.text && segment.text.trim().length > 0;
+          
+          if (!hasValidTimes || !hasText) {
+            console.warn(`Skipping invalid segment:`, {
+              start: segment.start,
+              end: segment.end,
+              text: segment.text?.substring(0, 50),
+              hasValidTimes,
+              hasText
+            });
+            return false;
+          }
+          
+          return true;
+        })
+        .map(segment => ({
+          startTime: Number(segment.start),
+          endTime: Number(segment.end),
+          text: segment.text.trim(),
+          confidence: typeof segment.confidence === 'number' ? segment.confidence : 0.8
+        }));
+
+      console.log(`Validated ${dbSegments.length} segments from ${segments.length} original segments for database storage`);
 
       // Store in database (even if 0 segments)
       if (dbSegments.length > 0) {
-        this.database.insertTranscriptSegments(videoId, dbSegments);
+        try {
+          this.database.insertTranscriptSegments(videoId, dbSegments);
+        } catch (dbError) {
+          console.error('Database insertion error:', dbError);
+          console.error('Failed segments sample:', dbSegments.slice(0, 3));
+          throw new Error(`Database storage failed: ${dbError instanceof Error ? dbError.message : String(dbError)}`);
+        }
       }
+      
       this.database.updateVideoTranscriptionStatus(videoId, 'completed');
 
       this.emit('progress', {
@@ -205,7 +285,7 @@ export class TranscriptionOrchestrator extends EventEmitter {
         stage: 'database_storage',
         progress: 100,
         message: dbSegments.length > 0 
-          ? 'Transcript stored successfully'
+          ? `Transcript stored successfully (${dbSegments.length} segments)`
           : 'No speech detected, marked as completed'
       });
 
@@ -325,9 +405,6 @@ export class TranscriptionOrchestrator extends EventEmitter {
   }
 
   /**
-   * Get model info
-   */
-  /**
    * Setup event listeners for progress tracking
    */
   private setupEventListeners(): void {
@@ -355,10 +432,5 @@ export class TranscriptionOrchestrator extends EventEmitter {
     this.queue.on('jobProgress', (progress: any) => {
       this.emit('jobProgress', progress);
     });
-
-    // Listen to worker-based transcriber events
-    this.whisperTranscriber.on('progress', (progress: any) => {
-      this.emit('whisperProgress', progress);
-    });
   }
-} 
+}

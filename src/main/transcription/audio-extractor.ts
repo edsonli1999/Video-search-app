@@ -2,12 +2,14 @@ import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import * as path from 'path';
 import * as fs from 'fs';
+import { EventEmitter } from 'events';
 
 export interface AudioExtractionOptions {
   outputFormat?: 'wav' | 'mp3';
   sampleRate?: number;
   channels?: number;
   abortSignal?: AbortSignal;
+  onProgress?: (progress: number) => void; // Add progress callback
 }
 
 export interface AudioExtractionResult {
@@ -17,11 +19,12 @@ export interface AudioExtractionResult {
   duration?: number;
 }
 
-export class AudioExtractor {
+export class AudioExtractor extends EventEmitter {
   private tempDir: string;
   private isConfigured = false;
 
   constructor(tempDir: string = 'temp/audio') {
+    super();
     this.tempDir = tempDir;
     this.ensureTempDir();
     this.configureFFmpeg();
@@ -80,7 +83,8 @@ export class AudioExtractor {
       outputFormat = 'wav',
       sampleRate = 16000,
       channels = 1,
-      abortSignal
+      abortSignal,
+      onProgress
     } = options;
 
     const outputPath = path.join(this.tempDir, `${videoId}.${outputFormat}`);
@@ -135,7 +139,14 @@ export class AudioExtractor {
           })
           .on('progress', (progress: any) => {
             if (progress.percent) {
-              console.log(`🎵 AudioExtractor: Progress: ${progress.percent.toFixed(1)}% - ${progress.timemark}`);
+              const percentComplete = Math.min(100, Math.max(0, progress.percent));
+              console.log(`🎵 AudioExtractor: Progress: ${percentComplete.toFixed(1)}% - ${progress.timemark}`);
+              
+              // Emit progress event and call callback if provided
+              this.emit('progress', percentComplete);
+              if (onProgress) {
+                onProgress(percentComplete);
+              }
             }
           })
           .on('stderr', (stderrLine: string) => {
@@ -164,6 +175,12 @@ export class AudioExtractor {
               const outputSize = fs.statSync(outputPath).size;
               console.log(`🎉 AudioExtractor: Native audio extraction completed successfully!`);
               console.log(`✅ AudioExtractor: Output file size: ${outputSize} bytes`);
+              
+              // Emit final progress
+              this.emit('progress', 100);
+              if (onProgress) {
+                onProgress(100);
+              }
               
               resolve({
                 success: true,
@@ -310,4 +327,4 @@ export class AudioExtractor {
       return false;
     }
   }
-} 
+}

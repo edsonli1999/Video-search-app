@@ -151,7 +151,7 @@ class WhisperWorker {
       
       this.sendMessage('progress', { stage: 'transcribing', progress: 90, message: 'Processing segments...' });
 
-      // Process segments
+      // Process segments with validation
       const segments = this.processSegments(result);
       
       this.sendMessage('progress', { stage: 'transcribing', progress: 100, message: 'Transcription completed' });
@@ -188,49 +188,106 @@ class WhisperWorker {
 
   private processSegments(result: any): TranscriptionSegment[] {
     const segments: TranscriptionSegment[] = [];
+    let lastEndTime = 0; // Track the last end time for fixing missing timestamps
 
     if (result.chunks && Array.isArray(result.chunks)) {
       // Handle chunked output
-      result.chunks.forEach((chunk: any) => {
-        if (chunk.timestamp && chunk.text) {
+      result.chunks.forEach((chunk: any, index: number) => {
+        if (chunk.text && chunk.text.trim()) {
+          let startTime = 0;
+          let endTime = 0;
+          
+          // Handle various timestamp formats
+          if (chunk.timestamp) {
+            if (Array.isArray(chunk.timestamp)) {
+              // timestamp is [start, end] array
+              startTime = chunk.timestamp[0] ?? lastEndTime;
+              endTime = chunk.timestamp[1] ?? (startTime + 1); // Default to 1 second duration if no end
+            } else if (typeof chunk.timestamp === 'object') {
+              // timestamp might be {start: x, end: y} object
+              startTime = chunk.timestamp.start ?? chunk.timestamp[0] ?? lastEndTime;
+              endTime = chunk.timestamp.end ?? chunk.timestamp[1] ?? (startTime + 1);
+            } else if (typeof chunk.timestamp === 'number') {
+              // Single timestamp value - use as start
+              startTime = chunk.timestamp;
+              endTime = startTime + 1; // Default 1 second duration
+            }
+          } else {
+            // No timestamp at all - estimate based on position
+            startTime = lastEndTime;
+            endTime = startTime + 1;
+          }
+          
+          // Ensure valid times
+          startTime = Math.max(0, startTime || 0);
+          endTime = Math.max(startTime + 0.1, endTime || (startTime + 1)); // Minimum 0.1 second duration
+          
           segments.push({
-            start: chunk.timestamp[0],
-            end: chunk.timestamp[1],
+            start: startTime,
+            end: endTime,
             text: chunk.text.trim(),
             confidence: chunk.score || 0.8
           });
+          
+          lastEndTime = endTime;
         }
       });
     } else if (result.segments && Array.isArray(result.segments)) {
       // Handle segment output
       result.segments.forEach((segment: any) => {
-        segments.push({
-          start: segment.start || 0,
-          end: segment.end || 0,
-          text: segment.text.trim(),
-          confidence: segment.avg_logprob || 0.8
-        });
+        if (segment.text && segment.text.trim()) {
+          const startTime = Math.max(0, segment.start ?? segment.start_time ?? lastEndTime);
+          const endTime = Math.max(startTime + 0.1, segment.end ?? segment.end_time ?? (startTime + 1));
+          
+          segments.push({
+            start: startTime,
+            end: endTime,
+            text: segment.text.trim(),
+            confidence: segment.avg_logprob ?? segment.confidence ?? 0.8
+          });
+          
+          lastEndTime = endTime;
+        }
       });
     } else if (result.text) {
       // Handle single text output (no timestamps)
       segments.push({
         start: 0,
-        end: result.duration || 0,
+        end: result.duration || 10, // Default to 10 seconds if no duration
         text: result.text.trim(),
         confidence: 0.8
       });
     }
 
-    // Deduplicate segments
+    // Deduplicate and validate segments
     const deduplicatedSegments = this.deduplicateSegments(segments);
     
-    // Filter out empty segments and normalize confidence scores
-    return deduplicatedSegments
-      .filter(segment => segment.text.length > 0)
+    // Final validation: ensure all segments have valid timestamps
+    const validatedSegments = deduplicatedSegments
+      .filter(segment => {
+        const isValid = segment.text.length > 0 && 
+                       typeof segment.start === 'number' && 
+                       typeof segment.end === 'number' &&
+                       !isNaN(segment.start) &&
+                       !isNaN(segment.end) &&
+                       segment.end > segment.start;
+        
+        if (!isValid) {
+          console.warn('Filtering out invalid segment:', segment);
+        }
+        
+        return isValid;
+      })
       .map(segment => ({
-        ...segment,
+        start: Number(segment.start),
+        end: Number(segment.end),
+        text: segment.text,
         confidence: Math.max(0, Math.min(1, segment.confidence))
       }));
+    
+    console.log(`Processed ${validatedSegments.length} valid segments from ${segments.length} raw segments`);
+    
+    return validatedSegments;
   }
 
   private deduplicateSegments(segments: TranscriptionSegment[]): TranscriptionSegment[] {
@@ -325,4 +382,4 @@ if (parentPort) {
       sendMessage('error', `Worker error: ${error instanceof Error ? error.message : String(error)}`);
     }
   });
-} 
+}
