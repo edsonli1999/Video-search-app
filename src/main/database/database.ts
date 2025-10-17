@@ -89,13 +89,13 @@ export class VideoDatabase {
 
     } catch (error) {
       console.error('❌ Database initialization failed:');
-      
+
       if (error instanceof Error) {
         console.error('Error type:', error.constructor.name);
         console.error('Error message:', error.message);
         console.error('Full error:', error);
         console.error('Stack trace:', error.stack);
-        
+
         // Additional diagnostic info
         if (error.message.includes('NODE_MODULE_VERSION')) {
           console.error('🔧 This is a Node.js version mismatch issue');
@@ -225,14 +225,14 @@ export class VideoDatabase {
   insertTranscriptSegments(videoId: number, segments: Omit<TranscriptSegment, 'id' | 'videoId'>[]): void {
     if (this.isAvailable) {
       console.log(`📝 Database: Inserting ${segments.length} transcript segments for video ${videoId}`);
-      
+
       // Check if any segments already exist for this video
       const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM transcript_segments WHERE video_id = ?');
       const beforeCount = countStmt.get(videoId).count;
       if (beforeCount > 0) {
         console.warn(`⚠️ Database: Video ${videoId} already has ${beforeCount} segments! This may indicate a clearing issue.`);
       }
-      
+
       const stmt = this.db.prepare(`
         INSERT INTO transcript_segments (video_id, start_time, end_time, text, confidence)
         VALUES (?, ?, ?, ?, ?)
@@ -245,7 +245,7 @@ export class VideoDatabase {
       });
 
       transaction(segments);
-      
+
       // Verify insertion
       const afterCount = countStmt.get(videoId).count;
       console.log(`📝 Database: Successfully inserted segments. Total count for video ${videoId}: ${afterCount}`);
@@ -283,16 +283,16 @@ export class VideoDatabase {
       const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM transcript_segments WHERE video_id = ?');
       const beforeCount = countStmt.get(videoId).count;
       console.log(`🗑️ Database: Found ${beforeCount} existing segments for video ${videoId} before clearing`);
-      
+
       // Clear the segments
       const deleteStmt = this.db.prepare('DELETE FROM transcript_segments WHERE video_id = ?');
       const result = deleteStmt.run(videoId);
       console.log(`🗑️ Database: Deleted ${result.changes} transcript segments for video ${videoId}`);
-      
+
       // Verify they were actually deleted
       const afterCount = countStmt.get(videoId).count;
       console.log(`🗑️ Database: ${afterCount} segments remain after clearing`);
-      
+
       if (afterCount > 0) {
         console.error(`❌ Database: Failed to clear all segments! ${afterCount} segments still exist`);
       }
@@ -465,6 +465,75 @@ export class VideoDatabase {
       text: row.text,
       confidence: row.confidence
     };
+  }
+
+  // Get videos by transcription status
+  getVideosByStatus(status: VideoFile['transcriptionStatus']): VideoFile[] {
+    if (this.isAvailable) {
+      const stmt = this.db.prepare(`
+      SELECT * FROM videos 
+      WHERE transcription_status = ? 
+      ORDER BY updated_at DESC
+    `);
+
+      const rows = stmt.all(status) as any[];
+      return rows.map(row => this.mapRowToVideo(row));
+    } else {
+      // Memory-based implementation
+      return this.memoryVideos.filter(v => v.transcriptionStatus === status);
+    }
+  }
+
+  // Get videos by folder path
+  getVideosByFolder(folderPath: string): VideoFile[] {
+    if (this.isAvailable) {
+      const stmt = this.db.prepare(`
+      SELECT * FROM videos 
+      WHERE file_path LIKE ? 
+      ORDER BY file_name ASC
+    `);
+
+      const rows = stmt.all(`${folderPath}%`) as any[];
+      return rows.map(row => this.mapRowToVideo(row));
+    } else {
+      // Memory-based implementation
+      return this.memoryVideos.filter(v => v.filePath.startsWith(folderPath));
+    }
+  }
+
+  // Get videos by status and folder
+  getVideosByStatusAndFolder(status: VideoFile['transcriptionStatus'], folderPath: string): VideoFile[] {
+    if (this.isAvailable) {
+      const stmt = this.db.prepare(`
+      SELECT * FROM videos 
+      WHERE transcription_status = ? AND file_path LIKE ?
+      ORDER BY updated_at DESC
+    `);
+
+      const rows = stmt.all(status, `${folderPath}%`) as any[];
+      return rows.map(row => this.mapRowToVideo(row));
+    } else {
+      // Memory-based implementation
+      return this.memoryVideos.filter(v =>
+        v.transcriptionStatus === status && v.filePath.startsWith(folderPath)
+      );
+    }
+  }
+
+  // Get count of videos by status
+  getVideoCountByStatus(status: VideoFile['transcriptionStatus']): number {
+    if (this.isAvailable) {
+      const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM videos 
+      WHERE transcription_status = ?
+    `);
+
+      const result = stmt.get(status) as any;
+      return result.count;
+    } else {
+      // Memory-based implementation
+      return this.memoryVideos.filter(v => v.transcriptionStatus === status).length;
+    }
   }
 
   close(): void {

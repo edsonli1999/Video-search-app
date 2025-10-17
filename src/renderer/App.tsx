@@ -9,6 +9,9 @@ declare global {
       selectFolder: () => Promise<string | null>;
       scanVideos: (folderPath: string) => Promise<VideoFile[]>;
       getVideos: () => Promise<VideoFile[]>;
+      getVideosByStatus: (status: VideoFile['transcriptionStatus']) => Promise<VideoFile[]>;
+      getVideosByFolder: (folderPath: string) => Promise<VideoFile[]>;
+      getVideosByStatusAndFolder: (status: VideoFile['transcriptionStatus'], folderPath: string) => Promise<VideoFile[]>;
       transcribeVideo: (videoId: number) => Promise<{ success: boolean; message: string }>;
       cancelTranscription: (videoId: number) => Promise<{ success: boolean; message: string }>;
       searchVideos: (query: string) => Promise<SearchResult[]>;
@@ -21,10 +24,15 @@ declare global {
   }
 }
 
+type TabType = 'new-session' | 'completed' | 'failed';
+
 const App: React.FC = () => {
-  const [videos, setVideos] = useState<VideoFile[]>([]);
+  const [activeTab, setActiveTab] = useState<TabType>('new-session');
+  const [newSessionVideos, setNewSessionVideos] = useState<VideoFile[]>([]);
+  const [completedVideos, setCompletedVideos] = useState<VideoFile[]>([]);
+  const [failedVideos, setFailedVideos] = useState<VideoFile[]>([]);
+  
   const [selectedFolder, setSelectedFolder] = useState<string | null>(() => {
-    // Load selected folder from localStorage on startup
     return localStorage.getItem('selectedVideoFolder');
   });
   const [isScanning, setIsScanning] = useState(false);
@@ -58,37 +66,54 @@ const App: React.FC = () => {
     }
   };
 
-  console.log('🔍 App render - searchQuery:', searchQuery);
-  console.log('🔍 App render - searchResults:', searchResults);
-  console.log('🔍 App render - searchResults.length:', searchResults.length);
-  console.log('🔍 App render - isSearching:', isSearching);
+  // Load videos by status - updated to filter by folder for new session
+  const loadVideosByStatus = async () => {
+    try {
+      // Always load completed and failed videos (global)
+      const [completed, failed] = await Promise.all([
+        window.electronAPI.getVideosByStatus('completed'),
+        window.electronAPI.getVideosByStatus('failed')
+      ]);
+      
+      // For new session videos, only show videos from the selected folder
+      let newSession: VideoFile[] = [];
+      if (selectedFolder) {
+        // Get pending and processing videos from the selected folder only
+        const [pending, processing] = await Promise.all([
+          window.electronAPI.getVideosByStatusAndFolder('pending', selectedFolder),
+          window.electronAPI.getVideosByStatusAndFolder('processing', selectedFolder)
+        ]);
+        newSession = [...pending, ...processing];
+      }
+      // If no folder is selected, newSession remains empty
+      
+      setCompletedVideos(completed);
+      setFailedVideos(failed);
+      setNewSessionVideos(newSession);
+      
+      console.log(`📊 Loaded videos - New: ${newSession.length}, Completed: ${completed.length}, Failed: ${failed.length}`);
+      if (selectedFolder) {
+        console.log(`📂 Filtered new session videos to folder: ${selectedFolder}`);
+      }
+    } catch (error) {
+      console.error('Error loading videos by status:', error);
+    }
+  };
 
-  // Manual search function - triggered by button click or Enter key
+  // Manual search function
   const performSearch = async () => {
     if (!searchQuery.trim()) {
-      console.log('🔍 Empty query, clearing results');
       setSearchResults([]);
       return;
     }
 
-    console.log('🔍 Starting manual search for:', searchQuery);
     setIsSearching(true);
     try {
-      console.log('🔍 Calling window.electronAPI.searchVideos with:', searchQuery);
       const results = await window.electronAPI.searchVideos(searchQuery);
-      console.log('🔍 Search results received:', results);
-      console.log('🔍 Number of results:', results.length);
-      
-      if (results.length > 0) {
-        console.log('🔍 First result details:', results[0]);
-      }
-      
       setSearchResults(results);
-      console.log('🔍 Search results state updated');
     } catch (error) {
-      console.error('🔍 Error searching:', error);
+      console.error('Error searching:', error);
     } finally {
-      console.log('🔍 Setting isSearching to false');
       setIsSearching(false);
     }
   };
@@ -96,47 +121,43 @@ const App: React.FC = () => {
   // Handle Enter key press in search input
   const handleSearchKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      console.log('🔍 Enter key pressed, triggering search');
       performSearch();
     }
   };
 
   // Load existing videos on app start and set up event listeners
   useEffect(() => {
-    loadVideos();
+    loadVideosByStatus();
     
-    // Listen for transcription completion events
+    // Listen for transcription events
     window.electronAPI.onTranscriptionCompleted((data) => {
       console.log(`🎉 Frontend: Transcription completed for video ${data.videoId}`);
-      // Clear progress on completion
       setTranscriptionProgress(prev => {
         const updated = { ...prev };
         delete updated[data.videoId];
         return updated;
       });
-      loadVideos(); // Reload videos to update status
+      loadVideosByStatus(); // Reload videos to update status
     });
     
     window.electronAPI.onTranscriptionFailed((data) => {
       console.log(`❌ Frontend: Transcription failed for video ${data.videoId}:`, data.error);
-      // Clear progress on failure
       setTranscriptionProgress(prev => {
         const updated = { ...prev };
         delete updated[data.videoId];
         return updated;
       });
-      loadVideos(); // Reload videos to update status
+      loadVideosByStatus();
     });
 
     window.electronAPI.onTranscriptionCancelled((data) => {
       console.log(`🛑 Frontend: Transcription cancelled for video ${data.videoId}`);
-      // Clear progress on cancellation
       setTranscriptionProgress(prev => {
         const updated = { ...prev };
         delete updated[data.videoId];
         return updated;
       });
-      loadVideos(); // Reload videos to update status
+      loadVideosByStatus();
     });
 
     window.electronAPI.onTranscriptionProgress((data) => {
@@ -152,37 +173,24 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const loadVideos = async () => {
-    console.log('🔍 loadVideos called');
-    try {
-      const allVideos = await window.electronAPI.getVideos();
-      console.log('🔍 Videos loaded:', allVideos);
-      console.log('🔍 Number of videos:', allVideos.length);
-      
-      // Log transcription status of each video
-      allVideos.forEach((video, index) => {
-        console.log(`🔍 Video ${index + 1}: ${video.fileName} - Status: ${video.transcriptionStatus}`);
-      });
-      
-      setVideos(allVideos);
-    } catch (error) {
-      console.error('🔍 Error loading videos:', error);
-    }
-  };
+  // Reload videos when selected folder changes
+  useEffect(() => {
+    loadVideosByStatus();
+  }, [selectedFolder]);
 
   const handleSelectFolder = async () => {
     try {
       const folderPath = await window.electronAPI.selectFolder();
       if (folderPath) {
         setSelectedFolder(folderPath);
-        // Save to localStorage for persistence
         localStorage.setItem('selectedVideoFolder', folderPath);
         
         setIsScanning(true);
-        
-        const scannedVideos = await window.electronAPI.scanVideos(folderPath);
-        setVideos(scannedVideos);
+        await window.electronAPI.scanVideos(folderPath);
         setIsScanning(false);
+        
+        // Reload videos after scanning - will now filter by the new folder
+        await loadVideosByStatus();
       }
     } catch (error) {
       console.error('Error selecting folder:', error);
@@ -190,35 +198,10 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSearch = async (query: string) => {
-    console.log('🔍 handleSearch called with query:', query);
-    
-    if (!query.trim()) {
-      console.log('🔍 Empty query, clearing results');
-      setSearchResults([]);
-      return;
-    }
-
-    console.log('🔍 Starting search, setting isSearching to true');
-    setIsSearching(true);
-    try {
-      console.log('🔍 Calling window.electronAPI.searchVideos with:', query);
-      const results = await window.electronAPI.searchVideos(query);
-      console.log('🔍 Search results received:', results);
-      console.log('🔍 Number of results:', results.length);
-      
-      if (results.length > 0) {
-        console.log('🔍 First result details:', results[0]);
-      }
-      
-      setSearchResults(results);
-      console.log('🔍 Search results state updated');
-    } catch (error) {
-      console.error('🔍 Error searching:', error);
-    } finally {
-      console.log('🔍 Setting isSearching to false');
-      setIsSearching(false);
-    }
+  const handleClearFolder = () => {
+    setSelectedFolder(null);
+    localStorage.removeItem('selectedVideoFolder');
+    // This will trigger the useEffect to reload videos
   };
 
   const handleTranscribeVideo = async (video: VideoFile, isRetranscribe: boolean = false) => {
@@ -227,23 +210,15 @@ const App: React.FC = () => {
     try {
       console.log(`${isRetranscribe ? '🔄 Re-transcribing' : '🎬 Transcribing'} video ${video.id}: ${video.fileName}`);
       
-      // Update video status locally
-      setVideos(prev => prev.map(v => 
-        v.id === video.id ? { ...v, transcriptionStatus: 'processing' } : v
-      ));
-
       const result = await window.electronAPI.transcribeVideo(video.id);
       
       if (result.success) {
         console.log(`📋 Frontend: ${isRetranscribe ? 'Re-transcription' : 'Transcription'} job queued for video ${video.id}`);
-        // Don't reload immediately - wait for completion event
+        // Update local state to reflect processing status
+        loadVideosByStatus();
       }
     } catch (error) {
       console.error('Error transcribing video:', error);
-      // Revert status on error
-      setVideos(prev => prev.map(v =>
-        v.id === video.id ? { ...v, transcriptionStatus: 'failed' } : v
-      ));
     }
   };
 
@@ -252,12 +227,10 @@ const App: React.FC = () => {
 
     try {
       console.log(`🛑 Cancelling transcription for video ${video.id}: ${video.fileName}`);
-
       const result = await window.electronAPI.cancelTranscription(video.id);
 
       if (result.success) {
         console.log(`🛑 Frontend: Cancellation request sent for video ${video.id}`);
-        // Clear progress immediately for better UX
         setTranscriptionProgress(prev => {
           const updated = { ...prev };
           if (video.id) {
@@ -278,10 +251,7 @@ const App: React.FC = () => {
       setIsLoadingTranscript(true);
       setCurrentVideo(video);
       
-      console.log(`📝 Loading transcript for video ${video.id}`);
       const segments = await window.electronAPI.getTranscript(video.id);
-      console.log(`📝 Loaded ${segments.length} transcript segments`);
-      
       setTranscriptSegments(segments);
     } catch (error) {
       console.error('Error loading transcript:', error);
@@ -309,178 +279,273 @@ const App: React.FC = () => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Render video card component
+  const renderVideoCard = (video: VideoFile) => (
+    <div key={video.id || video.filePath} className="video-card">
+      <div className="video-info">
+        <h3 className="video-title">{video.fileName}</h3>
+        <p className="video-size">{formatFileSize(video.fileSize)}</p>
+        <p className="video-path">{video.filePath}</p>
+      </div>
+      
+      <div className="video-actions">
+        {video.transcriptionStatus === 'processing' && video.id && transcriptionProgress[video.id] ? (
+          <div className="progress-section">
+            <div className="progress-info">
+              <div className="progress-stage">{getStageDisplayName(transcriptionProgress[video.id].stage)}</div>
+              <div className="progress-message">{transcriptionProgress[video.id].message}</div>
+            </div>
+            <div className="progress-bar-container">
+              <div
+                className="progress-bar"
+                style={{ width: `${transcriptionProgress[video.id].progress}%` }}
+              />
+              <span className="progress-text">{Math.round(transcriptionProgress[video.id].progress)}%</span>
+            </div>
+            <button
+              onClick={() => handleCancelTranscription(video)}
+              className="cancel-btn"
+              title="Cancel transcription"
+            >
+              🛑 Cancel
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className={`status status-${video.transcriptionStatus}`}>
+              {video.transcriptionStatus}
+            </div>
+
+            {video.transcriptionStatus === 'pending' && (
+              <button
+                onClick={() => handleTranscribeVideo(video)}
+                className="transcribe-btn"
+              >
+                Transcribe
+              </button>
+            )}
+
+            {video.transcriptionStatus === 'processing' && (
+              <button
+                onClick={() => handleCancelTranscription(video)}
+                className="cancel-btn"
+                title="Cancel transcription"
+              >
+                🛑 Cancel
+              </button>
+            )}
+
+            {video.transcriptionStatus === 'completed' && (
+              <div className="completed-actions">
+                <button 
+                  onClick={() => handleViewTranscript(video)}
+                  className="view-btn"
+                >
+                  View Transcript
+                </button>
+                <button 
+                  onClick={() => handleTranscribeVideo(video, true)}
+                  className="retranscribe-btn"
+                  title="Re-transcribe this video"
+                >
+                  🔄 Re-transcribe
+                </button>
+              </div>
+            )}
+            
+            {video.transcriptionStatus === 'failed' && (
+              <button 
+                onClick={() => handleTranscribeVideo(video, true)}
+                className="retry-btn"
+                title="Retry transcription"
+              >
+                🔄 Retry
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="app">
       <header className="app-header">
         <h1>Video Search App</h1>
         <div className="header-actions">
-          <button onClick={handleSelectFolder} disabled={isScanning}>
-            {isScanning ? 'Scanning...' : 'Select Video Folder'}
-          </button>
+          {selectedFolder && (
+            <span className="selected-folder-text">{selectedFolder}</span>
+          )}
         </div>
       </header>
 
       <main className="app-main">
-        {selectedFolder && (
-          <div className="folder-info">
-            <p><strong>Selected Folder:</strong> {selectedFolder}</p>
-            <p><strong>Videos Found:</strong> {videos.length}</p>
-          </div>
-        )}
-
-        <div className="search-section">
-          <div className="search-bar">
-            <input
-              type="text"
-              placeholder="Search video transcripts... (Press Enter or click Search)"
-              value={searchQuery}
-              onChange={(e) => {
-                console.log('🔍 Input onChange - new value:', e.target.value);
-                setSearchQuery(e.target.value);
-              }}
-              onKeyPress={handleSearchKeyPress}
-              disabled={isSearching}
-            />
-            <button 
-              onClick={performSearch}
-              disabled={isSearching || !searchQuery.trim()}
-              className="search-btn"
+        {/* Tab Navigation */}
+        <div className="tabs-container">
+          <div className="tabs-header">
+            <button
+              className={`tab-button ${activeTab === 'new-session' ? 'active' : ''}`}
+              onClick={() => setActiveTab('new-session')}
             >
-              {isSearching ? 'Searching...' : 'Search'}
+              New Session ({newSessionVideos.length})
             </button>
-            {searchQuery && (
-              <button 
-                onClick={() => {
-                  setSearchQuery('');
-                  setSearchResults([]);
-                }}
-                disabled={isSearching}
-                className="clear-btn"
-                title="Clear search"
-              >
-                ✕
-              </button>
-            )}
+            <button
+              className={`tab-button ${activeTab === 'completed' ? 'active' : ''}`}
+              onClick={() => setActiveTab('completed')}
+            >
+              Completed ({completedVideos.length})
+            </button>
+            <button
+              className={`tab-button ${activeTab === 'failed' ? 'active' : ''}`}
+              onClick={() => setActiveTab('failed')}
+            >
+              Failed ({failedVideos.length})
+            </button>
           </div>
 
-          {searchResults.length > 0 && (
-            <div className="search-results">
-              <h3>Search Results ({searchResults.length})</h3>
-              {searchResults.map((result) => {
-                console.log('🔍 Rendering search result:', result);
-                return (
-                <div key={result.videoId} className="search-result">
-                  <h4>{result.videoName}</h4>
-                  <div className="result-segments">
-                      {result.segments.map((segment) => {
-                        console.log('🔍 Rendering segment:', segment);
-                        return (
-                      <div key={segment.id} className="segment">
-                        <span className="timestamp">
-                          {formatTime(segment.startTime)} - {formatTime(segment.endTime)}
-                        </span>
-                        <p className="segment-text">{segment.text}</p>
-                      </div>
-                        );
-                      })}
+          {/* Tab Content */}
+          <div className="tab-content">
+            {activeTab === 'new-session' && (
+              <div className="new-session-tab">
+                <div className="folder-selection-area">
+                  <h2>Start a New Transcription Session</h2>
+                  <div className="folder-controls">
+                    <button 
+                      onClick={handleSelectFolder} 
+                      disabled={isScanning}
+                      className="select-folder-btn"
+                    >
+                      {isScanning ? 'Scanning...' : selectedFolder ? 'Change Folder' : 'Select Video Folder'}
+                    </button>
+                    {selectedFolder && (
+                      <button
+                        onClick={handleClearFolder}
+                        className="clear-folder-btn"
+                        title="Clear folder selection"
+                      >
+                        ✕ Clear
+                      </button>
+                    )}
+                  </div>
+                  
+                  {selectedFolder && (
+                    <div className="folder-info">
+                      <p><strong>Current Folder:</strong> {selectedFolder}</p>
+                      <p><strong>Videos in this folder:</strong> {newSessionVideos.length} pending/processing</p>
+                    </div>
+                  )}
+
+                  {!selectedFolder && (
+                    <p className="no-folder-message">
+                      Select a folder to see videos that need transcription
+                    </p>
+                  )}
+                </div>
+
+                {selectedFolder && newSessionVideos.length > 0 && (
+                  <div className="videos-section">
+                    <h3>Pending & Processing Videos in {selectedFolder.split(/[/\\]/).pop()}</h3>
+                    <div className="videos-grid">
+                      {newSessionVideos.map(renderVideoCard)}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                )}
 
-        <div className="videos-section">
-          <h2>Video Library ({videos.length})</h2>
-          <div className="videos-grid">
-            {videos.map((video) => (
-              <div key={video.id || video.filePath} className="video-card">
-                <div className="video-info">
-                  <h3 className="video-title">{video.fileName}</h3>
-                  <p className="video-size">{formatFileSize(video.fileSize)}</p>
-                  <p className="video-path">{video.filePath}</p>
-                </div>
-                
-                <div className="video-actions">
-                  {video.transcriptionStatus === 'processing' && video.id && transcriptionProgress[video.id] ? (
-                    <div className="progress-section">
-                      <div className="progress-info">
-                        <div className="progress-stage">{getStageDisplayName(transcriptionProgress[video.id].stage)}</div>
-                        <div className="progress-message">{transcriptionProgress[video.id].message}</div>
-                      </div>
-                      <div className="progress-bar-container">
-                        <div
-                          className="progress-bar"
-                          style={{ width: `${transcriptionProgress[video.id].progress}%` }}
-                        />
-                        <span className="progress-text">{Math.round(transcriptionProgress[video.id].progress)}%</span>
-                      </div>
-                      <button
-                        onClick={() => handleCancelTranscription(video)}
-                        className="cancel-btn"
-                        title="Cancel transcription"
-                      >
-                        🛑 Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <div className={`status status-${video.transcriptionStatus}`}>
-                        {video.transcriptionStatus}
-                      </div>
-
-                      {video.transcriptionStatus === 'pending' && (
-                        <button
-                          onClick={() => handleTranscribeVideo(video)}
-                          className="transcribe-btn"
-                        >
-                          Transcribe
-                        </button>
-                      )}
-
-                      {video.transcriptionStatus === 'processing' && (
-                        <button
-                          onClick={() => handleCancelTranscription(video)}
-                          className="cancel-btn"
-                          title="Cancel transcription"
-                        >
-                          🛑 Cancel
-                        </button>
-                      )}
-                    </>
-                  )}
-
-                  {video.transcriptionStatus === 'completed' && (
-                    <div className="completed-actions">
-                      <button 
-                        onClick={() => handleViewTranscript(video)}
-                        className="view-btn"
-                      >
-                        View Transcript
-                      </button>
-                      <button 
-                        onClick={() => handleTranscribeVideo(video, true)}
-                        className="retranscribe-btn"
-                        title="Re-transcribe this video (useful for testing/debugging)"
-                      >
-                        🔄 Re-transcribe
-                      </button>
-                    </div>
-                  )}
-                  
-                  {video.transcriptionStatus === 'failed' && (
-                    <button 
-                      onClick={() => handleTranscribeVideo(video, true)}
-                      className="retry-btn"
-                      title="Retry transcription"
-                    >
-                      🔄 Retry
-                    </button>
-                  )}
-                </div>
+                {selectedFolder && newSessionVideos.length === 0 && (
+                  <div className="empty-state">
+                    <p>No pending or processing videos in this folder. All videos may already be transcribed!</p>
+                  </div>
+                )}
               </div>
-            ))}
+            )}
+
+            {activeTab === 'completed' && (
+              <div className="completed-tab">
+                <div className="search-section">
+                  <div className="search-bar">
+                    <input
+                      type="text"
+                      placeholder="Search completed transcripts..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyPress={handleSearchKeyPress}
+                      disabled={isSearching}
+                    />
+                    <button 
+                      onClick={performSearch}
+                      disabled={isSearching || !searchQuery.trim()}
+                      className="search-btn"
+                    >
+                      {isSearching ? 'Searching...' : 'Search'}
+                    </button>
+                    {searchQuery && (
+                      <button 
+                        onClick={() => {
+                          setSearchQuery('');
+                          setSearchResults([]);
+                        }}
+                        disabled={isSearching}
+                        className="clear-btn"
+                        title="Clear search"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  {searchResults.length > 0 && (
+                    <div className="search-results">
+                      <h3>Search Results ({searchResults.length})</h3>
+                      {searchResults.map((result) => (
+                        <div key={result.videoId} className="search-result">
+                          <h4>{result.videoName}</h4>
+                          <div className="result-segments">
+                            {result.segments.map((segment) => (
+                              <div key={segment.id} className="segment">
+                                <span className="timestamp">
+                                  {formatTime(segment.startTime)} - {formatTime(segment.endTime)}
+                                </span>
+                                <p className="segment-text">{segment.text}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {completedVideos.length > 0 ? (
+                  <div className="videos-section">
+                    <h3>Completed Transcriptions</h3>
+                    <div className="videos-grid">
+                      {completedVideos.map(renderVideoCard)}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <p>No completed transcriptions yet. Start by transcribing videos in the New Session tab.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'failed' && (
+              <div className="failed-tab">
+                {failedVideos.length > 0 ? (
+                  <div className="videos-section">
+                    <h3>Failed Transcriptions</h3>
+                    <div className="videos-grid">
+                      {failedVideos.map(renderVideoCard)}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <p>No failed transcriptions. Great job!</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -520,11 +585,7 @@ const App: React.FC = () => {
                   </div>
                 ) : (
                   <div className="no-transcript">
-                    No transcript segments found. 
-                    {currentVideo.transcriptionStatus === 'completed' 
-                      ? ' The video may have been silent or contain no speech.'
-                      : ' Please transcribe this video first.'
-                    }
+                    No transcript segments found.
                   </div>
                 )}
               </div>

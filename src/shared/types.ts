@@ -49,6 +49,9 @@ export const IPC_CHANNELS = {
   TRANSCRIPTION_FAILED: 'transcription-failed',
   TRANSCRIPTION_CANCELLED: 'transcription-cancelled',
   TRANSCRIPTION_PROGRESS: 'transcription-progress',
+  GET_VIDEOS_BY_STATUS: 'get-videos-by-status',
+  GET_VIDEOS_BY_FOLDER: 'get-videos-by-folder',
+  GET_VIDEOS_BY_STATUS_AND_FOLDER: 'get-videos-by-status-and-folder',
 } as const;
 
 // Supported video formats

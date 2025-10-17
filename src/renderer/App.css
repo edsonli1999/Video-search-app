@@ -568,3 +568,181 @@
     align-items: stretch;
   }
 }
+
+/* Tab Navigation Styles */
+.tabs-container {
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  overflow: hidden;
+}
+
+.tabs-header {
+  display: flex;
+  background-color: #f8f9fa;
+  border-bottom: 2px solid #dee2e6;
+}
+
+.tab-button {
+  flex: 1;
+  padding: 1rem 1.5rem;
+  background: none;
+  border: none;
+  font-size: 1rem;
+  font-weight: 500;
+  color: #6c757d;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.tab-button:hover {
+  background-color: #e9ecef;
+  color: #495057;
+}
+
+.tab-button.active {
+  color: #2c3e50;
+  background-color: white;
+}
+
+.tab-button.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: #3498db;
+}
+
+.tab-content {
+  padding: 2rem;
+  min-height: 400px;
+}
+
+/* New Session Tab Styles */
+.new-session-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.folder-selection-area {
+  text-align: center;
+  padding: 3rem 2rem;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  border: 2px dashed #dee2e6;
+}
+
+.folder-selection-area h2 {
+  margin: 0 0 1.5rem 0;
+  color: #2c3e50;
+}
+
+.select-folder-btn {
+  background-color: #3498db;
+  color: white;
+  border: none;
+  padding: 1rem 2rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.select-folder-btn:hover:not(:disabled) {
+  background-color: #2980b9;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(52, 152, 219, 0.3);
+}
+
+.select-folder-btn:disabled {
+  background-color: #7f8c8d;
+  cursor: not-allowed;
+}
+
+.selected-folder-text {
+  color: #ecf0f1;
+  font-size: 0.9rem;
+  background-color: rgba(255, 255, 255, 0.1);
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+}
+
+/* Empty State Styles */
+.empty-state {
+  text-align: center;
+  padding: 4rem 2rem;
+  color: #7f8c8d;
+}
+
+.empty-state p {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+/* Completed Tab Styles */
+.completed-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+/* Failed Tab Styles */
+.failed-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+/* Responsive tabs */
+@media (max-width: 768px) {
+  .tabs-header {
+    flex-direction: column;
+  }
+
+  .tab-button {
+    border-bottom: 1px solid #dee2e6;
+  }
+
+  .tab-button.active::after {
+    display: none;
+  }
+
+  .tab-content {
+    padding: 1rem;
+  }
+}
+
+.folder-controls {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.clear-folder-btn {
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.clear-folder-btn:hover {
+  background-color: #c0392b;
+}
+
+.no-folder-message {
+  color: #7f8c8d;
+  font-style: italic;
+  margin-top: 1rem;
+}

@@ -48,14 +48,14 @@ const IPC_CHANNELS = {
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
   // Folder selection
-  selectFolder: (): Promise<string | null> => 
+  selectFolder: (): Promise<string | null> =>
     ipcRenderer.invoke(IPC_CHANNELS.SELECT_FOLDER),
 
   // Video operations
-  scanVideos: (folderPath: string): Promise<VideoFile[]> => 
+  scanVideos: (folderPath: string): Promise<VideoFile[]> =>
     ipcRenderer.invoke(IPC_CHANNELS.SCAN_VIDEOS, folderPath),
 
-  getVideos: (): Promise<VideoFile[]> => 
+  getVideos: (): Promise<VideoFile[]> =>
     ipcRenderer.invoke(IPC_CHANNELS.GET_VIDEOS),
 
   transcribeVideo: (videoId: number): Promise<{ success: boolean; message: string }> =>
@@ -64,11 +64,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cancelTranscription: (videoId: number): Promise<{ success: boolean; message: string }> =>
     ipcRenderer.invoke(IPC_CHANNELS.CANCEL_TRANSCRIPTION, videoId),
 
+  getVideosByStatus: (status: string): Promise<VideoFile[]> =>
+    ipcRenderer.invoke('get-videos-by-status', status),
+
+  getVideosByFolder: (folderPath: string): Promise<VideoFile[]> =>
+    ipcRenderer.invoke('get-videos-by-folder', folderPath),
+
+  getVideosByStatusAndFolder: (status: string, folderPath: string): Promise<VideoFile[]> =>
+    ipcRenderer.invoke('get-videos-by-status-and-folder', status, folderPath),
+
   // Search operations
-  searchVideos: (query: string): Promise<SearchResult[]> => 
+  searchVideos: (query: string): Promise<SearchResult[]> =>
     ipcRenderer.invoke(IPC_CHANNELS.SEARCH_VIDEOS, query),
 
-  getTranscript: (videoId: number): Promise<TranscriptSegment[]> => 
+  getTranscript: (videoId: number): Promise<TranscriptSegment[]> =>
     ipcRenderer.invoke(IPC_CHANNELS.GET_TRANSCRIPT, videoId),
 
   onTranscriptionCompleted: (callback: (data: { videoId: number; jobId: string }) => void) => {
@@ -86,6 +95,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onTranscriptionProgress: (callback: (data: { videoId: number; stage: string; progress: number; message: string }) => void) => {
     ipcRenderer.on(IPC_CHANNELS.TRANSCRIPTION_PROGRESS, (event, data) => callback(data));
   },
+
 });
 
 // Type definitions for the exposed API

@@ -1,5 +1,5 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron';
-import { IPC_CHANNELS } from '../../shared/types';
+import { IPC_CHANNELS, VideoFile } from '../../shared/types';
 import { getDatabase } from '../database/database';
 import { VideoScanner } from '../video/video-scanner';
 import { TranscriptionOrchestrator } from '../transcription';
@@ -83,22 +83,22 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   // Handle search
   ipcMain.handle(IPC_CHANNELS.SEARCH_VIDEOS, async (event, query: string) => {
     console.log('🔍 IPC: SEARCH_VIDEOS handler called with query:', query);
-    
+
     try {
       if (!query.trim()) {
         console.log('🔍 IPC: Empty query, returning empty array');
         return [];
       }
-      
+
       console.log('🔍 IPC: Calling db.searchTranscripts with:', query);
       const results = db.searchTranscripts(query);
       console.log('🔍 IPC: Database search results:', results);
       console.log('🔍 IPC: Number of results from database:', results.length);
-      
+
       if (results.length > 0) {
         console.log('🔍 IPC: First result from database:', results[0]);
       }
-      
+
       return results;
     } catch (error) {
       console.error('🔍 IPC: Error searching videos:', error);
@@ -120,11 +120,11 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle(IPC_CHANNELS.TRANSCRIBE_VIDEO, async (event, videoId: number) => {
     try {
       console.log(`🎬 IPC: Transcription request received for video ${videoId}`);
-      
+
       // Get video information
       const videos = db.getAllVideos();
       const video = videos.find(v => v.id === videoId);
-      
+
       if (!video) {
         throw new Error(`Video with ID ${videoId} not found`);
       }
@@ -145,13 +145,13 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
       // Queue the transcription job
       const jobId = await transcriptionOrchestrator.queueTranscription(videoId, video.filePath);
-      
+
       console.log(`📋 IPC: Transcription queued with job ID: ${jobId}`);
-      
-      return { 
-        success: true, 
+
+      return {
+        success: true,
         message: 'Transcription queued successfully',
-        jobId 
+        jobId
       };
     } catch (error) {
       console.error('❌ IPC: Error queuing transcription:', error);
@@ -194,6 +194,36 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       }
     } catch (error) {
       console.error('❌ IPC: Error cancelling transcription:', error);
+      throw error;
+    }
+  });
+
+  // Handle getting videos by status
+  ipcMain.handle('get-videos-by-status', async (event, status: VideoFile['transcriptionStatus']) => {
+    try {
+      return db.getVideosByStatus(status);
+    } catch (error) {
+      console.error('Error getting videos by status:', error);
+      throw error;
+    }
+  });
+
+  // Handle getting videos by folder
+  ipcMain.handle('get-videos-by-folder', async (event, folderPath: string) => {
+    try {
+      return db.getVideosByFolder(folderPath);
+    } catch (error) {
+      console.error('Error getting videos by folder:', error);
+      throw error;
+    }
+  });
+
+  // Handle getting videos by status and folder
+  ipcMain.handle('get-videos-by-status-and-folder', async (event, status: VideoFile['transcriptionStatus'], folderPath: string) => {
+    try {
+      return db.getVideosByStatusAndFolder(status, folderPath);
+    } catch (error) {
+      console.error('Error getting videos by status and folder:', error);
       throw error;
     }
   });
