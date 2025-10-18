@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { VideoFile, SearchResult, TranscriptSegment } from '../shared/types';
 import './App.css';
 
@@ -25,6 +25,14 @@ declare global {
 }
 
 type TabType = 'new-session' | 'completed' | 'failed';
+
+interface FolderStatistics {
+  total: number;
+  pending: number;
+  processing: number;
+  completed: number;
+  failed: number;
+}
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('new-session');
@@ -66,35 +74,65 @@ const App: React.FC = () => {
     }
   };
 
-  // Load videos by status - updated to filter by folder for new session
+  // Memoized folder statistics - only recalculates when newSessionVideos changes
+  const folderStatistics = useMemo<FolderStatistics>(() => {
+    const stats = {
+      total: newSessionVideos.length,
+      pending: 0,
+      processing: 0,
+      completed: 0,
+      failed: 0
+    };
+
+    // Single pass through the array to count all statuses
+    newSessionVideos.forEach(video => {
+      switch (video.transcriptionStatus) {
+        case 'pending':
+          stats.pending++;
+          break;
+        case 'processing':
+          stats.processing++;
+          break;
+        case 'completed':
+          stats.completed++;
+          break;
+        case 'failed':
+          stats.failed++;
+          break;
+      }
+    });
+
+    return stats;
+  }, [newSessionVideos]);
+
+  // Memoized folder name extraction
+  const folderName = useMemo(() => {
+    if (!selectedFolder) return null;
+    return selectedFolder.split(/[/\\]/).pop() || selectedFolder;
+  }, [selectedFolder]);
+
+  // Load videos by status - updated to show ALL videos in folder for new session
   const loadVideosByStatus = async () => {
     try {
-      // Always load completed and failed videos (global)
+      // Always load completed and failed videos globally
       const [completed, failed] = await Promise.all([
         window.electronAPI.getVideosByStatus('completed'),
         window.electronAPI.getVideosByStatus('failed')
       ]);
       
-      // For new session videos, only show videos from the selected folder
+      // For new session, show ALL videos from the selected folder
       let newSession: VideoFile[] = [];
       if (selectedFolder) {
-        // Get pending and processing videos from the selected folder only
-        const [pending, processing] = await Promise.all([
-          window.electronAPI.getVideosByStatusAndFolder('pending', selectedFolder),
-          window.electronAPI.getVideosByStatusAndFolder('processing', selectedFolder)
-        ]);
-        newSession = [...pending, ...processing];
+        // Get ALL videos from the selected folder, regardless of status
+        newSession = await window.electronAPI.getVideosByFolder(selectedFolder);
+        console.log(`📂 Loaded ALL videos from folder: ${selectedFolder} (${newSession.length} total)`);
       }
-      // If no folder is selected, newSession remains empty
       
       setCompletedVideos(completed);
       setFailedVideos(failed);
       setNewSessionVideos(newSession);
       
-      console.log(`📊 Loaded videos - New: ${newSession.length}, Completed: ${completed.length}, Failed: ${failed.length}`);
-      if (selectedFolder) {
-        console.log(`📂 Filtered new session videos to folder: ${selectedFolder}`);
-      }
+      console.log(`📊 Loaded videos - Folder: ${newSession.length}, Completed (global): ${completed.length}, Failed (global): ${failed.length}`);
     } catch (error) {
       console.error('Error loading videos by status:', error);
     }
@@ -189,7 +227,7 @@ const App: React.FC = () => {
         await window.electronAPI.scanVideos(folderPath);
         setIsScanning(false);
         
-        // Reload videos after scanning - will now filter by the new folder
+        // Reload videos after scanning - will now show ALL videos in the folder
         await loadVideosByStatus();
       }
     } catch (error) {
@@ -278,6 +316,19 @@ const App: React.FC = () => {
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+
+  // Memoized status breakdown string
+  const statusBreakdown = useMemo(() => {
+    if (folderStatistics.total === 0) return 'No videos';
+    
+    const parts = [];
+    if (folderStatistics.pending > 0) parts.push(`${folderStatistics.pending} pending`);
+    if (folderStatistics.processing > 0) parts.push(`${folderStatistics.processing} processing`);
+    if (folderStatistics.completed > 0) parts.push(`${folderStatistics.completed} completed`);
+    if (folderStatistics.failed > 0) parts.push(`${folderStatistics.failed} failed`);
+    
+    return parts.join(', ');
+  }, [folderStatistics]);
 
   // Render video card component
   const renderVideoCard = (video: VideoFile) => (
@@ -387,7 +438,7 @@ const App: React.FC = () => {
               className={`tab-button ${activeTab === 'new-session' ? 'active' : ''}`}
               onClick={() => setActiveTab('new-session')}
             >
-              New Session ({newSessionVideos.length})
+              New Session {selectedFolder && folderStatistics.total > 0 ? `(${folderStatistics.total})` : ''}
             </button>
             <button
               className={`tab-button ${activeTab === 'completed' ? 'active' : ''}`}
@@ -428,32 +479,33 @@ const App: React.FC = () => {
                     )}
                   </div>
                   
-                  {selectedFolder && (
+                  {selectedFolder && folderStatistics.total > 0 && (
                     <div className="folder-info">
                       <p><strong>Current Folder:</strong> {selectedFolder}</p>
-                      <p><strong>Videos in this folder:</strong> {newSessionVideos.length} pending/processing</p>
+                      <p><strong>Total Videos:</strong> {folderStatistics.total}</p>
+                      <p><strong>Status Breakdown:</strong> {statusBreakdown}</p>
                     </div>
                   )}
 
                   {!selectedFolder && (
                     <p className="no-folder-message">
-                      Select a folder to see videos that need transcription
+                      Select a folder to see all videos and manage transcriptions
                     </p>
                   )}
                 </div>
 
-                {selectedFolder && newSessionVideos.length > 0 && (
+                {selectedFolder && folderStatistics.total > 0 && (
                   <div className="videos-section">
-                    <h3>Pending & Processing Videos in {selectedFolder.split(/[/\\]/).pop()}</h3>
+                    <h3>All Videos in {folderName}</h3>
                     <div className="videos-grid">
                       {newSessionVideos.map(renderVideoCard)}
                     </div>
                   </div>
                 )}
 
-                {selectedFolder && newSessionVideos.length === 0 && (
+                {selectedFolder && folderStatistics.total === 0 && (
                   <div className="empty-state">
-                    <p>No pending or processing videos in this folder. All videos may already be transcribed!</p>
+                    <p>No videos found in this folder. Try selecting a different folder with video files.</p>
                   </div>
                 )}
               </div>
