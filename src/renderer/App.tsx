@@ -25,6 +25,7 @@ declare global {
 }
 
 type TabType = 'new-session' | 'completed' | 'failed';
+type TranscriptTabType = 'segmented' | 'plain-text';
 
 interface FolderStatistics {
   total: number;
@@ -50,6 +51,8 @@ const App: React.FC = () => {
   const [currentVideo, setCurrentVideo] = useState<VideoFile | null>(null);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
   const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
+  const [activeTranscriptTab, setActiveTranscriptTab] = useState<TranscriptTabType>('segmented');
+  const [copySuccess, setCopySuccess] = useState(false);
 
   // Progress tracking state
   const [transcriptionProgress, setTranscriptionProgress] = useState<{
@@ -110,6 +113,14 @@ const App: React.FC = () => {
     if (!selectedFolder) return null;
     return selectedFolder.split(/[/\\]/).pop() || selectedFolder;
   }, [selectedFolder]);
+
+  // Memoized plain text transcript
+  const plainTextTranscript = useMemo(() => {
+    return transcriptSegments
+      .map(segment => segment.text)
+      .join(' ')
+      .trim();
+  }, [transcriptSegments]);
 
   // Load videos by status - updated to show ALL videos in folder for new session
   const loadVideosByStatus = async () => {
@@ -288,6 +299,8 @@ const App: React.FC = () => {
     try {
       setIsLoadingTranscript(true);
       setCurrentVideo(video);
+      setActiveTranscriptTab('segmented'); // Reset to segmented view
+      setCopySuccess(false);
       
       const segments = await window.electronAPI.getTranscript(video.id);
       setTranscriptSegments(segments);
@@ -302,6 +315,17 @@ const App: React.FC = () => {
   const handleCloseTranscript = () => {
     setCurrentVideo(null);
     setTranscriptSegments([]);
+    setCopySuccess(false);
+  };
+
+  const handleCopyTranscript = async () => {
+    try {
+      await navigator.clipboard.writeText(plainTextTranscript);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy transcript:', error);
+    }
   };
 
   const formatFileSize = (bytes: number): string => {
@@ -616,25 +640,64 @@ const App: React.FC = () => {
                 </button>
               </div>
               
+              {/* Transcript Tabs */}
+              <div className="transcript-tabs">
+                <button
+                  className={`transcript-tab-button ${activeTranscriptTab === 'segmented' ? 'active' : ''}`}
+                  onClick={() => setActiveTranscriptTab('segmented')}
+                >
+                  Segmented
+                </button>
+                <button
+                  className={`transcript-tab-button ${activeTranscriptTab === 'plain-text' ? 'active' : ''}`}
+                  onClick={() => setActiveTranscriptTab('plain-text')}
+                >
+                  Plain Text
+                </button>
+              </div>
+              
               <div className="transcript-content">
                 {isLoadingTranscript ? (
                   <div className="loading">Loading transcript...</div>
                 ) : transcriptSegments.length > 0 ? (
-                  <div className="transcript-segments">
-                    {transcriptSegments.map((segment, index) => (
-                      <div key={segment.id || index} className="segment">
-                        <span className="timestamp">
-                          {formatTime(segment.startTime)} - {formatTime(segment.endTime)}
-                        </span>
-                        <p className="segment-text">{segment.text}</p>
-                        {segment.confidence && (
-                          <span className="confidence">
-                            Confidence: {Math.round(segment.confidence * 100)}%
-                          </span>
-                        )}
+                  <>
+                    {activeTranscriptTab === 'segmented' && (
+                      <div className="transcript-segments">
+                        {transcriptSegments.map((segment, index) => (
+                          <div key={segment.id || index} className="segment">
+                            <span className="timestamp">
+                              {formatTime(segment.startTime)} - {formatTime(segment.endTime)}
+                            </span>
+                            <p className="segment-text">{segment.text}</p>
+                            {segment.confidence && (
+                              <span className="confidence">
+                                Confidence: {Math.round(segment.confidence * 100)}%
+                              </span>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    )}
+                    
+                    {activeTranscriptTab === 'plain-text' && (
+                      <div className="plain-text-view">
+                        <div className="plain-text-controls">
+                          <button 
+                            onClick={handleCopyTranscript}
+                            className="copy-btn"
+                          >
+                            {copySuccess ? '✓ Copied!' : '📋 Copy All'}
+                          </button>
+                        </div>
+                        <textarea
+                          className="plain-text-content"
+                          value={plainTextTranscript}
+                          readOnly
+                          spellCheck={false}
+                        />
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div className="no-transcript">
                     No transcript segments found.
