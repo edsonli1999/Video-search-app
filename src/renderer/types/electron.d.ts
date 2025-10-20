@@ -9,6 +9,8 @@ declare global {
       transcribeVideo: (videoId: number) => Promise<{ success: boolean; message: string }>;
       searchVideos: (query: string) => Promise<SearchResult[]>;
       getTranscript: (videoId: number) => Promise<TranscriptSegment[]>;
+      onTranscriptionCompleted: (callback: (data: { videoId: number; jobId: string }) => void) => void;
+      onTranscriptionFailed: (callback: (data: { videoId: number; jobId: string; error: string }) => void) => void;
     };
   }
 }

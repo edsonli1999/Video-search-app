@@ -1,4 +1,7 @@
-# Video Search App - MVP
+# Video Search App
+
+- **App purpose:** desktop Electron app for managing a video library, extracting audio, running Whisper-based transcription, storing transcripts in a local DB, and enabling search/viewing of segments. Users pick a folder, scan videos, launch transcriptions, monitor progress, and read/search transcripts.
+- **Tech stack:** Electron + TypeScript app split into main (Node) and renderer (React) processes; React frontend with CSS styling; backend uses Node APIs like fluent-ffmpeg, ffmpeg-static, worker threads, and @xenova/transformers for Whisper; local database layer (likely SQLite via custom wrapper) for videos/transcripts; build tooling via webpack, TypeScript configs, npm scripts.
 
 A desktop application that helps users search their personal video files by spoken content through AI transcription indexing.
 

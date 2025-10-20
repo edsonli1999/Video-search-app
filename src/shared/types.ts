@@ -43,7 +43,15 @@ export const IPC_CHANNELS = {
   SEARCH_VIDEOS: 'search-videos',
   GET_VIDEOS: 'get-videos',
   TRANSCRIBE_VIDEO: 'transcribe-video',
+  CANCEL_TRANSCRIPTION: 'cancel-transcription',
   GET_TRANSCRIPT: 'get-transcript',
+  TRANSCRIPTION_COMPLETED: 'transcription-completed',
+  TRANSCRIPTION_FAILED: 'transcription-failed',
+  TRANSCRIPTION_CANCELLED: 'transcription-cancelled',
+  TRANSCRIPTION_PROGRESS: 'transcription-progress',
+  GET_VIDEOS_BY_STATUS: 'get-videos-by-status',
+  GET_VIDEOS_BY_FOLDER: 'get-videos-by-folder',
+  GET_VIDEOS_BY_STATUS_AND_FOLDER: 'get-videos-by-status-and-folder',
 } as const;
 
 // Supported video formats
