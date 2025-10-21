@@ -45,7 +45,7 @@ IPC provides secure communication between frontend and backend:
 - ✅ **Folder Selection**: Select directories containing video files
 - ✅ **Video Scanning**: Recursively scan folders for supported video formats
 - ✅ **Database Storage**: SQLite with FTS5 full-text search capabilities
-- ✅ **Mock Transcription**: Simulated AI transcription with dummy data
+- **Automated Transcription**: Whisper-based pipeline processes videos with progress feedback
 - ✅ **Real-time Search**: Search transcripts as you type
 - ✅ **Video Library**: View all videos with transcription status
 - ✅ **Responsive UI**: Clean interface with status indicators
@@ -113,11 +113,11 @@ IPC provides secure communication between frontend and backend:
 - Supported formats: `.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.m4v`, `.wmv`, `.flv`
 - Video metadata is stored in SQLite database
 
-### 2. **Mock Transcription Process**
-- Currently uses dummy transcript data for MVP
-- Simulates AI transcription with realistic delay
-- Stores transcript segments with timestamps and confidence scores
-- Updates video transcription status in real-time
+### 2. **Whisper Transcription Pipeline**
+- Extracts audio with FFmpeg before queueing jobs
+- Runs Whisper in a worker thread via @xenova/transformers
+- Streams stage-by-stage progress and writes transcripts to SQLite
+- Supports cancellation, retries, and automatic cleanup
 
 ### 3. **Search Functionality**
 - Uses SQLite FTS5 for full-text search
@@ -134,23 +134,30 @@ Frontend Request → IPC Channel → Backend Handler → Database Operation → 
 
 ```
 src/
-├── main/                     # Electron Main Process (Backend)
-│   ├── main.ts              # Application entry point
-│   ├── preload.ts           # IPC bridge for security
-│   ├── database/            # SQLite database management
-│   │   ├── database.ts      # Database operations & fallback
-│   │   └── schema.sql       # Database schema with FTS5
-│   ├── ipc/                 # Inter-Process Communication
-│   │   └── handlers.ts      # All IPC request handlers
-│   └── video/               # Video processing logic
-│       └── video-scanner.ts # File system scanning
-├── renderer/                # React Frontend (UI)
-│   ├── App.tsx             # Main React component
-│   ├── App.css             # Styling
-│   ├── index.tsx           # React entry point
-│   └── types/              # TypeScript definitions
-└── shared/                  # Shared Types & Constants
-    └── types.ts            # Common interfaces & IPC channels
+|- main/                     # Electron Main Process (backend)
+|  |- main.ts                # Application entry point
+|  |- preload.ts             # IPC bridge for security
+|  |- database/              # SQLite database management
+|  |  |- database.ts         # Database operations & fallback
+|  |  |- schema.sql          # Database schema with FTS5
+|  |- ipc/                   # Inter-Process Communication
+|  |  |- handlers.ts         # IPC request handlers
+|  |- transcription/         # Whisper orchestration, queue, workers
+|  |  |- audio-extractor.ts
+|  |  |- index.ts
+|  |  |- transcription-queue.ts
+|  |  |- whisper-transcriber.ts
+|  |  |- whisper-worker.ts
+|  |- video/                 # Video processing logic
+|     |- video-scanner.ts
+|- renderer/                 # React Frontend (UI)
+|  |- App.tsx
+|  |- App.css
+|  |- index.tsx
+|  |- types/
+|     |- electron.d.ts
+|- shared/                   # Shared types & constants
+   |- types.ts
 ```
 
 ## Database Schema
@@ -189,30 +196,26 @@ CREATE VIRTUAL TABLE transcripts USING fts5(
 
 ## Current Limitations (MVP)
 
-- **Mock Transcription**: Uses dummy data instead of real AI transcription
+- **CPU-heavy Transcription**: Whisper runs locally and can be slow on long videos
 - **No Video Playback**: Cannot play videos or jump to timestamps
 - **Basic Metadata**: No video duration or thumbnail extraction
 - **No Semantic Search**: Only keyword-based search currently
 
 ## Next Steps (Full Implementation)
 
-1. **Real AI Transcription**: 
-   - Integrate OpenAI Whisper for speech-to-text
-   - Add FFmpeg for audio extraction
-   
-2. **Enhanced Search**:
+1. **Enhanced Search**:
    - Add semantic search capabilities
    - Implement search suggestions and history
    
-3. **Video Player Integration**:
+2. **Video Player Integration**:
    - Embed video player with timestamp navigation
    - Add thumbnail generation
    
-4. **Performance Optimizations**:
-   - Background transcription queue
+3. **Performance Optimizations**:
+   - Parallel job processing and smarter prioritisation
    - Incremental indexing for large collections
    
-5. **UI/UX Improvements**:
+4. **UI/UX Improvements**:
    - Dark mode support
    - Keyboard shortcuts
    - Better progress indicators
