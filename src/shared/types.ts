@@ -26,6 +26,15 @@ export interface SearchResult {
   relevanceScore?: number;
 }
 
+export interface TranscriptionProgress {
+  videoId: number;
+  stage: 'audio_extraction' | 'transcription' | 'database_storage';
+  progress: number;
+  message: string;
+  elapsedMs: number;
+  etaMs: number;
+}
+
 export interface AppState {
   videos: VideoFile[];
   selectedFolder: string | null;

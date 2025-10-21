@@ -29,6 +29,15 @@ interface SearchResult {
   relevanceScore?: number;
 }
 
+interface TranscriptionProgress {
+  videoId: number;
+  stage: string;
+  progress: number;
+  message: string;
+  elapsedMs: number;
+  etaMs: number;
+}
+
 // Define IPC channels directly to avoid module resolution issues
 const IPC_CHANNELS = {
   SELECT_FOLDER: 'select-folder',
@@ -92,7 +101,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.TRANSCRIPTION_CANCELLED, (event, data) => callback(data));
   },
 
-  onTranscriptionProgress: (callback: (data: { videoId: number; stage: string; progress: number; message: string }) => void) => {
+  onTranscriptionProgress: (callback: (data: TranscriptionProgress) => void) => {
     ipcRenderer.on(IPC_CHANNELS.TRANSCRIPTION_PROGRESS, (event, data) => callback(data));
   },
 
@@ -112,7 +121,7 @@ declare global {
       onTranscriptionCompleted: (callback: (data: { videoId: number; jobId: string }) => void) => void;
       onTranscriptionFailed: (callback: (data: { videoId: number; jobId: string; error: string }) => void) => void;
       onTranscriptionCancelled: (callback: (data: { videoId: number; jobId: string }) => void) => void;
-      onTranscriptionProgress: (callback: (data: { videoId: number; stage: string; progress: number; message: string }) => void) => void;
+      onTranscriptionProgress: (callback: (data: TranscriptionProgress) => void) => void;
     };
   }
 }

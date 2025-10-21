@@ -9,6 +9,8 @@ export interface TranscriptionProgress {
   stage: 'audio_extraction' | 'transcription' | 'database_storage';
   progress: number;
   message: string;
+  elapsedMs: number;
+  etaMs: number;
 }
 
 export interface TranscriptionOptions {
@@ -19,12 +21,22 @@ export interface TranscriptionOptions {
   sampleRate?: number;
 }
 
+interface JobTimingData {
+  startTime: number;
+  stageStartTimes: {
+    audio_extraction?: number;
+    transcription?: number;
+    database_storage?: number;
+  };
+}
+
 export class TranscriptionOrchestrator extends EventEmitter {
   private audioExtractor: AudioExtractor;
   private whisperTranscriber: WhisperTranscriber;
   private queue: TranscriptionQueue;
   private database: VideoDatabase;
   private isInitialized = false;
+  private jobTimings: Map<number, JobTimingData> = new Map();
 
   constructor(database: VideoDatabase, tempDir: string = 'temp/audio') {
     super();
@@ -82,12 +94,82 @@ export class TranscriptionOrchestrator extends EventEmitter {
   }
 
   /**
+   * Emit progress with timing data
+   */
+  private emitProgressWithTiming(
+    videoId: number,
+    stage: 'audio_extraction' | 'transcription' | 'database_storage',
+    progress: number,
+    message: string,
+    actualPercent?: number
+  ): void {
+    const timing = this.jobTimings.get(videoId);
+    if (!timing) {
+      // If no timing data, emit without timing fields (shouldn't happen)
+      this.emit('progress', {
+        videoId,
+        stage,
+        progress,
+        message,
+        elapsedMs: 0,
+        etaMs: 0
+      });
+      return;
+    }
+
+    const now = Date.now();
+    const elapsedMs = now - timing.startTime;
+    
+    // Calculate progress fraction based on stage
+    let progressFraction = 0;
+    
+    if (stage === 'audio_extraction') {
+      // Audio extraction is 0-30% of total, actualPercent is 0-100
+      if (actualPercent !== undefined) {
+        progressFraction = (actualPercent / 100) * 0.3;
+      } else {
+        progressFraction = progress / 100;
+      }
+    } else if (stage === 'transcription') {
+      // Transcription is 30-90% of total
+      progressFraction = progress / 100;
+    } else if (stage === 'database_storage') {
+      // Database storage is 90-100% of total
+      progressFraction = progress / 100;
+    }
+    
+    // Ensure we don't divide by zero
+    const safeFraction = Math.max(progressFraction, 0.01);
+    const etaMs = Math.round(elapsedMs / safeFraction - elapsedMs);
+    
+    const progressData: TranscriptionProgress = {
+      videoId,
+      stage,
+      progress,
+      message,
+      elapsedMs: Math.round(elapsedMs),
+      etaMs: Math.max(0, etaMs) // Ensure ETA is never negative
+    };
+    
+    console.log(`📊 Progress: Video ${videoId}, Stage: ${stage}, Progress: ${progress}%, Elapsed: ${Math.round(elapsedMs / 1000)}s, ETA: ${Math.round(etaMs / 1000)}s`);
+    
+    this.emit('progress', progressData);
+  }
+
+  /**
    * Process a transcription job
    */
   async processTranscriptionJob(job: TranscriptionJob, options: TranscriptionOptions = {}): Promise<void> {
     const { videoId, videoPath, abortController } = job;
     
     try {
+      // Initialize timing data for this job
+      const startTime = Date.now();
+      this.jobTimings.set(videoId, {
+        startTime,
+        stageStartTimes: {}
+      });
+
       // Check for cancellation at start
       if (abortController?.signal.aborted) {
         throw new Error('Job was cancelled before processing started');
@@ -115,23 +197,31 @@ export class TranscriptionOrchestrator extends EventEmitter {
       this.database.updateVideoTranscriptionStatus(videoId, 'processing');
 
       // Stage 1: Audio Extraction (0-30% of overall progress)
-      this.emit('progress', {
+      const audioExtractionStart = Date.now();
+      const timing = this.jobTimings.get(videoId);
+      if (timing) {
+        timing.stageStartTimes.audio_extraction = audioExtractionStart;
+      }
+
+      this.emitProgressWithTiming(
         videoId,
-        stage: 'audio_extraction',
-        progress: 0,
-        message: 'Starting audio extraction...'
-      });
+        'audio_extraction',
+        0,
+        'Starting audio extraction...',
+        0
+      );
 
       // Listen to audio extraction progress
       const audioProgressHandler = (percent: number) => {
         // Map audio extraction progress to 0-30% of overall progress
         const overallProgress = Math.round(percent * 0.3);
-        this.emit('progress', {
+        this.emitProgressWithTiming(
           videoId,
-          stage: 'audio_extraction',
-          progress: overallProgress,
-          message: `Extracting audio: ${percent.toFixed(1)}%`
-        });
+          'audio_extraction',
+          overallProgress,
+          `Extracting audio: ${percent.toFixed(1)}%`,
+          percent // Pass the actual percentage for accurate ETA calculation
+        );
       };
 
       this.audioExtractor.on('progress', audioProgressHandler);
@@ -157,20 +247,26 @@ export class TranscriptionOrchestrator extends EventEmitter {
         throw new Error('Job was cancelled after audio extraction');
       }
 
-      this.emit('progress', {
+      this.emitProgressWithTiming(
         videoId,
-        stage: 'audio_extraction',
-        progress: 30,
-        message: 'Audio extraction completed'
-      });
+        'audio_extraction',
+        30,
+        'Audio extraction completed',
+        100
+      );
 
       // Stage 2: Transcription (30-90% of overall progress)
-      this.emit('progress', {
+      const transcriptionStart = Date.now();
+      if (timing) {
+        timing.stageStartTimes.transcription = transcriptionStart;
+      }
+
+      this.emitProgressWithTiming(
         videoId,
-        stage: 'transcription',
-        progress: 30,
-        message: 'Starting transcription with Whisper...'
-      });
+        'transcription',
+        30,
+        'Starting transcription with Whisper...'
+      );
 
       // Listen to whisper progress events
       const whisperProgressHandler = (progressData: any) => {
@@ -184,12 +280,12 @@ export class TranscriptionOrchestrator extends EventEmitter {
         }
         
         const overallProgress = Math.round(30 + (whisperPercent * 0.6));
-        this.emit('progress', {
+        this.emitProgressWithTiming(
           videoId,
-          stage: 'transcription',
-          progress: overallProgress,
-          message: progressData.message || `Transcribing: ${whisperPercent}%`
-        });
+          'transcription',
+          overallProgress,
+          progressData.message || `Transcribing: ${whisperPercent}%`
+        );
       };
 
       this.whisperTranscriber.on('progress', whisperProgressHandler);
@@ -215,20 +311,25 @@ export class TranscriptionOrchestrator extends EventEmitter {
         throw new Error('Job was cancelled after transcription');
       }
 
-      this.emit('progress', {
+      this.emitProgressWithTiming(
         videoId,
-        stage: 'transcription',
-        progress: 90,
-        message: 'Transcription completed'
-      });
+        'transcription',
+        90,
+        'Transcription completed'
+      );
 
       // Stage 3: Database Storage (90-100% of overall progress)
-      this.emit('progress', {
+      const dbStorageStart = Date.now();
+      if (timing) {
+        timing.stageStartTimes.database_storage = dbStorageStart;
+      }
+
+      this.emitProgressWithTiming(
         videoId,
-        stage: 'database_storage',
-        progress: 90,
-        message: 'Storing transcript in database...'
-      });
+        'database_storage',
+        90,
+        'Storing transcript in database...'
+      );
 
       // Handle transcription results with validation
       const segments = transcriptionResult.segments || [];
@@ -280,19 +381,25 @@ export class TranscriptionOrchestrator extends EventEmitter {
       
       this.database.updateVideoTranscriptionStatus(videoId, 'completed');
 
-      this.emit('progress', {
+      this.emitProgressWithTiming(
         videoId,
-        stage: 'database_storage',
-        progress: 100,
-        message: dbSegments.length > 0 
+        'database_storage',
+        100,
+        dbSegments.length > 0 
           ? `Transcript stored successfully (${dbSegments.length} segments)`
           : 'No speech detected, marked as completed'
-      });
+      );
 
       console.log(`✅ Transcription completed for video ${videoId}: ${dbSegments.length} segments`);
 
+      // Clean up timing data
+      this.jobTimings.delete(videoId);
+
     } catch (error) {
       console.error(`❌ Transcription error for video ${videoId}:`, error);
+
+      // Clean up timing data on error
+      this.jobTimings.delete(videoId);
 
       // Check if this was a cancellation
       if (abortController?.signal.aborted || (error instanceof Error && error.message.includes('cancelled'))) {
@@ -352,6 +459,9 @@ export class TranscriptionOrchestrator extends EventEmitter {
       await this.whisperTranscriber.terminate();
     }
     
+    // Clear timing data
+    this.jobTimings.clear();
+    
     console.log('✅ Transcription resources cleaned up');
   }
 
@@ -373,6 +483,11 @@ export class TranscriptionOrchestrator extends EventEmitter {
    * Cancel a job (either queued or processing)
    */
   cancelJob(jobId: string): boolean {
+    const job = this.queue.getAllJobs().find(j => j.id === jobId);
+    if (job) {
+      // Clean up timing data when job is cancelled
+      this.jobTimings.delete(job.videoId);
+    }
     return this.queue.cancelJob(jobId);
   }
 
