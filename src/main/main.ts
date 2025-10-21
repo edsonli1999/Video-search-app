@@ -40,11 +40,15 @@ function createWindow(): void {
 
 // This method will be called when Electron has finished initialization
 app.whenReady().then(() => {
-  // Setup IPC handlers
-  setupIpcHandlers();
+  console.log('🚀 App is ready');
   
-  // Create main window
+  // Create window first, then set up IPC handlers with window reference
   createWindow();
+  
+  // Set up IPC handlers with main window reference
+  if (mainWindow) {
+    setupIpcHandlers(mainWindow);
+  }
 
   app.on('activate', () => {
     // On macOS, re-create window when dock icon is clicked

@@ -7,7 +7,7 @@ A cross-platform desktop application that enables users to search their personal
 - ✅ **Infrastructure**: Electron app, SQLite database, video scanning, search UI
 - ✅ **Database**: Full-text search ready with FTS5, transcript storage schema implemented
 - ✅ **Video Management**: Folder selection, file scanning, metadata storage
-- ❌ **CRITICAL MISSING**: Real transcription pipeline (currently mocked with dummy data)
+- ✅ **Transcription Pipeline**: Native FFmpeg + Whisper working, needs accuracy improvements
 
 ### 🔧 Build Architecture Resolution
 **Issue Resolved**: Fixed critical module resolution problem that was preventing proper application builds.
@@ -27,8 +27,8 @@ A cross-platform desktop application that enables users to search their personal
 - **Frontend**: Electron + React + TypeScript
 - **Backend**: Node.js + TypeScript
 - **Database**: SQLite with FTS5 (Full-Text Search) - *Functional*
-- **AI Transcription**: OpenAI Whisper (local implementation) - *Not implemented, currently mocked*
-- **Video Processing**: FFmpeg - *Not implemented*
+- **AI Transcription**: Xenova/transformers (Whisper) - *Implemented, needs accuracy tuning*
+- **Video Processing**: FFmpeg-static (native binaries) - *Implemented*
 - **UI Framework**: Basic CSS (ShadCN planned for Phase 6)
 - **Build Tools**: TypeScript Compiler (main), Webpack (renderer), Electron Builder
 
@@ -44,12 +44,13 @@ video-search-app/
 │   │   │   └── database.ts  ✅ Complete and functional
 │   │   ├── video/
 │   │   │   └── video-scanner.ts ✅ Complete
-│   │   ├── transcription/   ❌ TO BE CREATED (Phase 3)
+│   │   ├── transcription/   ✅ Complete
 │   │   │   ├── audio-extractor.ts
 │   │   │   ├── whisper-transcriber.ts
-│   │   │   └── transcription-queue.ts
+│   │   │   ├── transcription-queue.ts
+│   │   │   └── index.ts
 │   │   └── ipc/
-│   │       └── handlers.ts  🔄 Complete but with mock transcription
+│   │       └── handlers.ts  ✅ Complete with real transcription
 │   ├── renderer/             # React frontend (Webpack bundled)
 │   │   ├── App.tsx          ✅ Complete UI implementation
 │   │   ├── App.css          ✅ Basic styling
@@ -58,11 +59,11 @@ video-search-app/
 │   └── shared/               # Shared types and utilities
 │       └── types.ts         ✅ Complete
 ├── dist/                     # Build output
-└── temp/                     ❌ TO BE CREATED (Phase 3)
-    └── audio/               # Temporary audio files for transcription
+└── temp/                     ✅ Auto-created during transcription
+    └── audio/               # Temporary audio files (auto-cleanup)
 ```
 
-## Database Schema (Implemented but Not Functional)
+## Database Schema (Implemented and Functional)
 ```sql
 -- Videos table
 CREATE TABLE videos (
@@ -114,102 +115,154 @@ CREATE TABLE search_history (
 ### ✅ Phase 2: Video File Management (COMPLETE) 
 **Status**: Core functionality complete, enhancements planned for later phases
 
-### 🚨 Phase 3: Audio Extraction & Transcription Pipeline (CRITICAL - IN PROGRESS)
+### ✅ Phase 3: Audio Extraction & Transcription Pipeline (COMPLETE + OPTIMIZED)
 
-**Current Issue**: Core functionality is completely mocked - app appears functional but transcription generates dummy data.
+**Status**: ⭐ **FULLY FUNCTIONAL** - Core pipeline working smoothly with recent critical improvements
 
-**Implementation Location**: Replace mock handler in `src/main/ipc/handlers.ts` (lines 84-130)
+#### 🎉 **Implementation Complete + Recent Enhancements**
 
-#### 📋 Implementation Specifications
+**FFmpeg Solution**: After evaluating WASM FFmpeg (browser-only limitation), implemented native FFmpeg using `ffmpeg-static` for automatic binary management across platforms.
 
-**1. Dependencies to Add**
-```json
-{
-  "dependencies": {
-    "@xenova/transformers": "^2.17.0",  // Local Whisper implementation
-    "events": "^3.3.0"                   // Progress event handling
-  }
+**Current Architecture**:
+- **Audio Extraction**: Native FFmpeg via `ffmpeg-static` + `fluent-ffmpeg` 
+- **Transcription**: Xenova/transformers with whisper-base model **in worker thread**
+- **Queue System**: Event-driven job processing with IPC notifications
+- **Progress Tracking**: Real-time updates to frontend via IPC events
+- **File Management**: Auto-cleanup of temp files after processing
+- **Duplicate Prevention**: Automatic segment deduplication and merging
+
+#### ✅ **Recently Completed Critical Improvements**
+- ✅ **Worker Thread Implementation**: Transcription now runs in background without freezing UI
+- ✅ **Duplicate Segment Prevention**: Smart deduplication system merges overlapping segments  
+- ✅ **Re-transcription Database Clearing**: Proper cleanup of old segments before re-transcription
+- ✅ **Enhanced Error Handling**: Better error reporting and recovery
+
+#### ✅ **Previously Completed Features**
+- ✅ Native FFmpeg integration (cross-platform, auto-configured)
+- ✅ Whisper transcription with timestamped segments  
+- ✅ Real-time progress updates in UI
+- ✅ Transcript storage in database with FTS5 search
+- ✅ Error handling with specific error messages
+- ✅ Queue management with job status tracking
+- ✅ Automatic temp file cleanup
+- ✅ Re-transcription capability for testing/debugging
+
+#### 🔧 **Future Optimizations** (Lower Priority)
+- **Transcription Accuracy**: Fine-tune Whisper parameters, language detection
+- **Performance**: Optimize audio preprocessing, consider larger Whisper models
+- **User Experience**: Add transcription cancellation, batch processing UI
+
+### 🔄 Phase 4: Search Implementation & UI Polish (IN PROGRESS)
+**Status**: Infrastructure complete, FTS5 search working with real transcript data, search UX improved
+
+#### ✅ **Recently Completed**
+- ✅ **Search UX Improvements**: Fixed search input focus loss with debounced search
+- ✅ **Search Functionality**: Real-time search working with FTS5 database
+
+#### 🐛 **Critical Issues Identified**
+- **Folder Selection Bug**: Selected folder doesn't persist properly between app sessions
+- **Video Display Confusion**: Current view mixes all database videos with current folder videos
+- **UX Organization**: Single view lacks clear separation between "all videos" vs "current folder"
+
+#### 📋 **Current Implementation Analysis**
+**Current Behavior**:
+- App startup: Shows ALL videos from database (mixed sources)
+- Folder selection: Replaces entire video list with only current folder videos
+- No clear distinction between "transcribed videos" vs "current folder videos"
+- Selected folder stored in localStorage but not properly utilized
+
+**Root Cause**: The app lacks proper state management to distinguish between:
+1. **All transcribed videos** (from any folder, stored in database)
+2. **Current folder videos** (mix of transcribed + un-transcribed from selected folder)
+
+#### 🎯 **Phase 4.2: Tab-Based Navigation Implementation (NEXT PRIORITY)**
+
+**Objective**: Implement clear separation between video sources with tab-based interface
+
+**Proposed Tab Structure**:
+- **Tab 1**: "All Videos" - Shows all videos in database (transcribed + un-transcribed from any folder)
+- **Tab 2**: "Current Folder" - Shows videos from the most recently selected folder (mix of transcribed + un-transcribed)
+
+**Implementation Steps**:
+
+1. **Step 1: Fix Folder Selection Persistence (CRITICAL)**
+   - **Issue**: Selected folder not properly restored on app startup
+   - **Solution**: 
+     - Properly restore selected folder from localStorage on app startup
+     - Add folder path display in UI
+     - Implement "Change Folder" button functionality
+   - **Priority**: HIGH - Must fix before tab implementation
+
+2. **Step 2: Implement Tab Navigation System**
+   - **New State Management**:
+     - `activeTab: 'all' | 'current-folder'`
+     - `currentFolderPath: string | null`
+     - Separate video lists for each tab
+   - **UI Components**:
+     - Tab navigation bar
+     - Tab-specific video lists
+     - Folder selection controls in "Current Folder" tab
+   - **Priority**: MEDIUM
+
+3. **Step 3: Enhanced Video Filtering & Display**
+   - **Tab 1 - "All Videos"**:
+     - Show all videos from database
+     - Filter by transcription status
+     - Search across all videos
+   - **Tab 2 - "Current Folder"**:
+     - Show videos from selected folder only
+     - Clear indication of transcription status
+     - "Change Folder" button
+     - Folder path display
+   - **Priority**: MEDIUM
+
+4. **Step 4: Improved Folder Management**
+   - **Folder Selection UX**:
+     - Clear current folder display
+     - Easy folder changing
+     - Folder validation and error handling
+   - **Database Integration**:
+     - Track folder associations for videos
+     - Support multiple folder sources
+   - **Priority**: LOW
+
+**Technical Implementation Details**:
+
+```typescript
+// New state structure
+interface AppState {
+  activeTab: 'all' | 'current-folder';
+  allVideos: VideoFile[];
+  currentFolderVideos: VideoFile[];
+  currentFolderPath: string | null;
+  // ... existing state
+}
+
+// New database methods needed
+interface VideoDatabase {
+  getVideosByFolder(folderPath: string): VideoFile[];
+  updateVideoFolder(videoId: number, folderPath: string): void;
 }
 ```
 
-**2. Whisper Integration**
-- **Library**: Use `@xenova/transformers` for local Whisper implementation
-- **Model**: `whisper-base` for balance of speed/accuracy (fallback to `whisper-tiny` if memory issues)
-- **Format**: Expects 16kHz mono WAV audio input
-- **Output**: Timestamped transcript segments with confidence scores
-- **Performance Target**: >1x real-time transcription speed
+**Benefits of This Approach**:
+1. **Clear Separation**: Users understand what they're viewing
+2. **Better Organization**: Logical grouping of video sources
+3. **Improved UX**: Intuitive navigation between different video sets
+4. **Future Extensibility**: Easy to add more tabs (e.g., "Recent", "Favorites")
 
-**3. FFmpeg Audio Extraction**
-- **Input**: Video files from database (all supported formats)
-- **Output**: `temp/audio/{videoId}.wav` (16kHz mono WAV)
-- **Configuration**:
-  ```typescript
-  ffmpeg(videoPath)
-    .audioFrequency(16000)
-    .audioChannels(1)
-    .audioCodec('pcm_s16le')
-    .format('wav')
-  ```
-- **Cleanup**: Auto-delete temp files after successful transcription
+**Success Criteria**:
+- ✅ Users can clearly distinguish between "all videos" and "current folder"
+- ✅ Selected folder persists properly between app sessions
+- ✅ Tab navigation is intuitive and responsive
+- ✅ Search works appropriately for each tab context
+- ✅ Folder selection is clear and functional
 
-**4. Progress Tracking System**
-- **IPC Events**: Send `transcription-progress` events to renderer
-- **Progress Stages**:
-  - Audio Extraction: 0-30%
-  - Whisper Transcription: 30-90% 
-  - Database Storage: 90-100%
-- **Data Format**: `{ videoId, stage, progress, message }`
-- **UI Integration**: Update existing transcription status indicators
-
-**5. Queue Management**
-- **Implementation**: Simple array-based in-memory queue
-- **Concurrency**: Process one video at a time initially
-- **Status Flow**: 'queued' → 'processing' → 'completed'/'failed'
-- **Queue Operations**: add, remove, getStatus, clearCompleted
-
-**6. Error Handling Strategy**
-- **Error Types**:
-  - `AudioExtractionError`: FFmpeg failures, file corruption
-  - `TranscriptionError`: Whisper model issues, memory problems
-  - `DatabaseError`: Storage failures
-- **Recovery**: Set video status to 'failed' with detailed error message
-- **Partial Failures**: Clean up temp files even on failure
-- **User Feedback**: Display specific error messages in UI
-
-**7. File Management**
-- **Temp Directory**: `{app-data}/temp/audio/`
-- **Naming Convention**: `{videoId}.wav`
-- **Size Limits**: Warn for videos >2GB, fail gracefully for >4GB
-- **Disk Space**: Check available space before extraction
-- **Cleanup Strategy**: Delete temp files after completion/failure
-
-#### 🔧 Files to Create/Modify
-
-**New Files**:
-- `src/main/transcription/audio-extractor.ts` - FFmpeg wrapper
-- `src/main/transcription/whisper-transcriber.ts` - Whisper integration  
-- `src/main/transcription/transcription-queue.ts` - Queue management
-- `src/main/transcription/index.ts` - Main transcription orchestrator
-
-**Modified Files**:
-- `src/main/ipc/handlers.ts` - Replace TRANSCRIBE_VIDEO handler (lines 84-130)
-- `package.json` - Add new dependencies
-- `src/renderer/App.tsx` - Add progress event listeners
-
-#### ✅ Success Criteria
-- [ ] Audio extraction from video files using FFmpeg
-- [ ] Local Whisper transcription with timestamped segments
-- [ ] Progress updates visible in UI during transcription
-- [ ] Transcript segments stored in existing database schema
-- [ ] Error handling with specific error messages
-- [ ] Automatic cleanup of temporary files
-- [ ] Queue system for multiple video transcription
-- [ ] Performance: >1x real-time transcription speed
-
-**Expected Implementation Time**: 4-6 hours for experienced developer
-
-### 🔄 Phase 4: Search Implementation (READY FOR TRANSCRIPTS)
-**Status**: Infrastructure complete, waiting for real transcript data from Phase 3
+#### 📋 **Planned UI Improvements** (After Tab Implementation)
+- **Enhanced Navigation**: Better organization and video library management
+- **Video Metadata Display**: Improved video information presentation
+- **Bulk Operations**: Select multiple videos for batch transcription
+- **Advanced Filtering**: Filter by date, size, transcription status
 
 ### 📋 Phase 5: Video Player Integration (PLANNED)
 ### 📋 Phase 6: UI/UX Polish (PLANNED)  
@@ -218,18 +271,28 @@ CREATE TABLE search_history (
 
 ## Next Steps (Critical Priorities)
 
-### 1. Implement Real Transcription (CRITICAL - Phase 3)
-- **Priority**: URGENT
-- **Issue**: Transcription is completely mocked with hardcoded data
-- **Impact**: Core functionality is not operational despite working UI
+### 1. 🚨 Fix Folder Selection Persistence (Phase 4.2 - CRITICAL)
+- **Priority**: HIGH - **BLOCKING UX ISSUE**
+- **Issue**: Selected folder doesn't persist properly between app sessions, causing confusion
 - **Tasks**:
-  - Research and implement FFmpeg integration for audio extraction
-  - Set up Whisper integration (recommend whisper.cpp for better performance)
-  - Replace mock transcription system with real implementation
-  - Test transcription pipeline end-to-end
+  - Properly restore selected folder from localStorage on app startup
+  - Add folder path display in UI to show current folder
+  - Implement "Change Folder" button functionality
+  - Test folder selection persistence thoroughly
 
-### 2. Enhanced Video Metadata Extraction (Phase 2 Enhancement)
-- **Priority**: MEDIUM
+### 2. 🎨 Implement Tab-Based Navigation (Phase 4.2 - UX Enhancement)
+- **Priority**: HIGH
+- **Issue**: Current single-view interface mixes all videos with current folder videos
+- **Tasks**:
+  - Create tab-based navigation system with two tabs:
+    - **Tab 1**: "All Videos" - All videos in database (transcribed + un-transcribed from any folder)
+    - **Tab 2**: "Current Folder" - Videos from selected folder only
+  - Implement proper state management for separate video lists
+  - Add tab-specific search and filtering
+  - Enhance video display with clear source indication
+
+### 3. Enhanced Video Metadata Extraction (Phase 2 Enhancement)
+- **Priority**: LOW-MEDIUM
 - **Issue**: Currently only basic file metadata is stored
 - **Tasks**:
   - Extract actual video metadata (duration, resolution, codec info)
@@ -237,8 +300,8 @@ CREATE TABLE search_history (
   - Improve error handling for corrupted video files
   - Enhance UI for video metadata display
 
-### 3. Search Enhancement (Phase 4)
-- **Priority**: LOW (ready for transcripts)
+### 4. Advanced Search Features (Phase 4 Enhancement)
+- **Priority**: LOW (after basic search is fixed)
 - **Issue**: Basic search works but could be enhanced
 - **Tasks**:
   - Implement search result ranking and relevance scoring
@@ -246,13 +309,14 @@ CREATE TABLE search_history (
   - Add advanced search options (time range, specific videos)
   - Optimize search performance for large transcript datasets
 
-### 4. Code Quality Improvements
-- **Priority**: MEDIUM
+### 5. Code Quality & Performance Improvements
+- **Priority**: LOW
 - **Tasks**:
   - Add proper error handling and logging throughout
   - Implement proper TypeScript strict mode compliance
   - Add JSDoc comments for better documentation
   - Refactor inline types in preload.ts (consider moving back to shared types)
+  - Memory usage optimization for large video libraries
 
 ## Technical Considerations
 
@@ -266,7 +330,7 @@ CREATE TABLE search_history (
 ### Performance Targets
 - Application starts in <3 seconds ✅ 
 - Video scanning: <1 second per 100 files ✅
-- Transcription speed: >1x real-time ❌ (Phase 3)
+- Transcription speed: >1x real-time ✅ 
 - Memory usage: <500MB for 1000 videos ❌ (To be tested)
 - Search response time: <200ms ✅
 
@@ -280,16 +344,21 @@ CREATE TABLE search_history (
 ```json
 {
   "dependencies": {
+    "@xenova/transformers": "^2.17.2",
     "better-sqlite3": "^9.6.0",
-    "fluent-ffmpeg": "^2.1.2", 
+    "ffmpeg-static": "^5.2.0",
+    "fluent-ffmpeg": "^2.1.2",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "wavefile": "^11.0.0"
   }
 }
 ```
 
 ## Assessment
 **Infrastructure Status**: ✅ Solid foundation with functional database, UI, and search
-**Critical Blocker**: ❌ Mock transcription prevents core functionality  
-**Next Priority**: Implement Phase 3 transcription pipeline
-**Timeline**: Once Phase 3 is complete, app will be feature-complete for core functionality
+**Core Functionality**: ✅ Complete transcription pipeline working end-to-end with worker threads
+**Recent Progress**: ✅ Fixed app freezing, duplicate segments, and re-transcription issues
+**Current Focus**: 🚨 Critical search input bug fix, then UI/UX tab implementation
+**Timeline**: App has strong core functionality, needs UX polish to be production-ready
+**Status**: Ready for Phase 4 completion (search + UI improvements)
