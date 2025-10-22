@@ -17,6 +17,12 @@ export interface TranscriptionOptions {
   priority?: number;
   audioFormat?: 'wav' | 'mp3';
   sampleRate?: number;
+  // New options for handling large files
+  chunkLength?: number;
+  strideLength?: number;
+  conditionOnPreviousText?: boolean;
+  maxContextLength?: number;
+  adaptiveChunking?: boolean;
 }
 
 export class TranscriptionOrchestrator extends EventEmitter {
@@ -172,6 +178,22 @@ export class TranscriptionOrchestrator extends EventEmitter {
         message: 'Starting transcription with Whisper...'
       });
 
+      // Prepare whisper options
+      const whisperOptions = {
+        model: options.model,
+        language: options.language,
+        abortSignal: abortController?.signal,
+        // Forward new options
+        chunkLength: options.chunkLength,
+        strideLength: options.strideLength,
+        conditionOnPreviousText: options.conditionOnPreviousText,
+        maxContextLength: options.maxContextLength,
+        adaptiveChunking: options.adaptiveChunking
+      };
+
+      // 🔍 DIAGNOSTIC LOGGING
+      console.log(`🔍 ORCHESTRATOR: Passing options to WhisperTranscriber for video ${videoId}:`, JSON.stringify(whisperOptions, null, 2));
+
       // Listen to whisper progress events
       const whisperProgressHandler = (progressData: any) => {
         // Map whisper progress (0-100) to 30-90% of overall progress
@@ -196,11 +218,7 @@ export class TranscriptionOrchestrator extends EventEmitter {
 
       const transcriptionResult = await this.whisperTranscriber.transcribeAudio(
         audioResult.outputPath!,
-        {
-          model: options.model,
-          language: options.language,
-          abortSignal: abortController?.signal
-        }
+        whisperOptions
       );
 
       // Remove the listener after transcription

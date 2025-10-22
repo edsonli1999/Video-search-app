@@ -16,6 +16,9 @@ interface TranscriptionRequest {
     task?: string;
     chunkLength?: number;
     strideLength?: number;
+    conditionOnPreviousText?: boolean;
+    maxContextLength?: number;
+    adaptiveChunking?: boolean;
   };
 }
 
@@ -103,6 +106,8 @@ class WhisperWorker {
   }
 
   async transcribeAudio(request: TranscriptionRequest): Promise<void> {
+    const diagnosticTimestamp = Date.now();
+    
     try {
       const { audioPath, options } = request;
 
@@ -124,35 +129,124 @@ class WhisperWorker {
 
       this.sendMessage('progress', { stage: 'transcribing', progress: 0, message: 'Starting transcription' });
 
+      // Get file size and calculate duration to determine if this is a "large" video
+      const stats = fs.statSync(audioPath);
+      const fileSizeMB = stats.size / (1024 * 1024);
+      
+      // Read audio to calculate duration
+      const audioBuffer = this.readWAVFileManually(audioPath);
+      const sampleRate = 16000; // Standard rate we use
+      const durationSeconds = audioBuffer.length / sampleRate;
+      
+      // Lower threshold: consider large if > 10MB OR > 15 minutes (900s)
+      const isLargeFile = fileSizeMB > 10 || durationSeconds > 900;
+
       const {
         language = 'en',
         task = 'transcribe',
-        chunkLength = 30,
-        strideLength = 5
+        // Adaptive defaults for large files
+        chunkLength = isLargeFile ? 20 : 30,  // Smaller chunks for large files
+        strideLength = isLargeFile ? 2 : 5,    // Less overlap for large files
+        conditionOnPreviousText = !isLargeFile, // Disable for large files by default
+        maxContextLength = 100,  // Limit context to prevent loops
+        adaptiveChunking = true
       } = options;
 
-      // Manual audio reading for Node.js environment
-      const audioBuffer = this.readWAVFileManually(audioPath);
+      // 🔍 DIAGNOSTIC LOGGING - File Analysis
+      const diagnosticInfo = {
+        timestamp: diagnosticTimestamp,
+        audioPath,
+        fileSizeMB: fileSizeMB.toFixed(2),
+        durationSeconds: durationSeconds.toFixed(2),
+        isLargeFile,
+        chunkingStrategy: {
+          chunkLength,
+          strideLength,
+          conditionOnPreviousText,
+          maxContextLength,
+          adaptiveChunking
+        },
+        detectionThresholds: {
+          fileSizeMB: 10,
+          durationSeconds: 900
+        }
+      };
+
+      console.log('🔍 WHISPER WORKER DIAGNOSTICS:', JSON.stringify(diagnosticInfo, null, 2));
       
+      this.sendMessage('progress', { 
+        stage: 'transcribing', 
+        progress: 5, 
+        message: `File: ${fileSizeMB.toFixed(1)}MB, ${durationSeconds.toFixed(0)}s - Using ${isLargeFile ? 'LARGE' : 'STANDARD'} file strategy (chunk=${chunkLength}s, stride=${strideLength}s, conditioning=${conditionOnPreviousText})` 
+      });
+
       // Configure transcription options
-      const transcriptionOptions = {
+      const transcriptionOptions: any = {
         language,
         task,
         chunk_length_s: chunkLength,
         stride_length_s: strideLength,
         return_timestamps: true,
-        return_segments: true
+        return_segments: true,
+        // Disable conditioning on previous text for large files to prevent loops
+        condition_on_previous_text: conditionOnPreviousText,
       };
+
+      // Add max_new_tokens to prevent runaway generation
+      if (isLargeFile) {
+        transcriptionOptions.max_new_tokens = maxContextLength;
+      }
+
+      console.log('🔍 TRANSCRIPTION OPTIONS SENT TO MODEL:', JSON.stringify(transcriptionOptions, null, 2));
 
       this.sendMessage('progress', { stage: 'transcribing', progress: 50, message: 'Processing with Whisper...' });
 
       // Perform transcription
       const result = await this.model(audioBuffer, transcriptionOptions);
       
-      this.sendMessage('progress', { stage: 'transcribing', progress: 90, message: 'Processing segments...' });
+      // 🔍 DIAGNOSTIC LOGGING - Raw Whisper Output
+      const rawChunkCount = result.chunks?.length || result.segments?.length || 0;
+      const rawChunkSample = this.extractChunkSample(result, 10);
+      
+      console.log(`🔍 RAW WHISPER OUTPUT: ${rawChunkCount} chunks/segments received`);
+      
+      // Save diagnostic data to temp file
+      const tempDir = path.join(process.cwd(), 'temp');
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+      
+      const diagnosticFile = path.join(tempDir, `whisper-diagnostic-${diagnosticTimestamp}.json`);
+      const diagnosticData = {
+        ...diagnosticInfo,
+        transcriptionOptions,
+        rawOutput: {
+          chunkCount: rawChunkCount,
+          chunkSample: rawChunkSample,
+          fullResult: {
+            hasChunks: !!result.chunks,
+            hasSegments: !!result.segments,
+            hasText: !!result.text,
+            chunkCount: result.chunks?.length,
+            segmentCount: result.segments?.length
+          }
+        }
+      };
+      
+      fs.writeFileSync(diagnosticFile, JSON.stringify(diagnosticData, null, 2));
+      console.log(`🔍 Diagnostic data saved to: ${diagnosticFile}`);
+      
+      this.sendMessage('progress', { 
+        stage: 'transcribing', 
+        progress: 90, 
+        message: `Processing ${rawChunkCount} segments (diagnostic: ${diagnosticFile})...` 
+      });
 
-      // Process segments with validation
-      const segments = this.processSegments(result);
+      // Process segments with enhanced validation and loop detection
+      const segments = this.processSegments(result, { detectLoops: isLargeFile });
+      
+      // 🔍 DIAGNOSTIC LOGGING - Post-processing results
+      console.log(`🔍 POST-PROCESSING: ${segments.length} segments after deduplication/loop detection (from ${rawChunkCount} raw)`);
       
       this.sendMessage('progress', { stage: 'transcribing', progress: 100, message: 'Transcription completed' });
       
@@ -163,8 +257,40 @@ class WhisperWorker {
       });
 
     } catch (error) {
+      console.error('🔍 TRANSCRIPTION ERROR:', error);
       this.sendMessage('error', `Transcription failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  private extractChunkSample(result: any, sampleSize: number = 10): any[] {
+    const sample: any[] = [];
+    
+    if (result.chunks && Array.isArray(result.chunks)) {
+      const chunks = result.chunks.slice(0, sampleSize);
+      chunks.forEach((chunk: any, index: number) => {
+        sample.push({
+          index,
+          timestamp: chunk.timestamp,
+          text: chunk.text?.substring(0, 100) || '',
+          textLength: chunk.text?.length || 0,
+          score: chunk.score
+        });
+      });
+    } else if (result.segments && Array.isArray(result.segments)) {
+      const segments = result.segments.slice(0, sampleSize);
+      segments.forEach((segment: any, index: number) => {
+        sample.push({
+          index,
+          start: segment.start ?? segment.start_time,
+          end: segment.end ?? segment.end_time,
+          text: segment.text?.substring(0, 100) || '',
+          textLength: segment.text?.length || 0,
+          confidence: segment.avg_logprob ?? segment.confidence
+        });
+      });
+    }
+    
+    return sample;
   }
 
   private readWAVFileManually(filePath: string): Float32Array {
@@ -186,7 +312,7 @@ class WhisperWorker {
     return samples;
   }
 
-  private processSegments(result: any): TranscriptionSegment[] {
+  private processSegments(result: any, options: { detectLoops?: boolean } = {}): TranscriptionSegment[] {
     const segments: TranscriptionSegment[] = [];
     let lastEndTime = 0; // Track the last end time for fixing missing timestamps
 
@@ -259,9 +385,15 @@ class WhisperWorker {
       });
     }
 
-    // Deduplicate and validate segments
-    const deduplicatedSegments = this.deduplicateSegments(segments);
+    console.log(`🔍 BEFORE DEDUPLICATION: ${segments.length} segments`);
+
+    // Apply enhanced deduplication and loop detection
+    const deduplicatedSegments = options.detectLoops 
+      ? this.deduplicateAndDetectLoops(segments)
+      : this.deduplicateSegments(segments);
     
+    console.log(`🔍 AFTER DEDUPLICATION: ${deduplicatedSegments.length} segments`);
+
     // Final validation: ensure all segments have valid timestamps
     const validatedSegments = deduplicatedSegments
       .filter(segment => {
@@ -273,7 +405,7 @@ class WhisperWorker {
                        segment.end > segment.start;
         
         if (!isValid) {
-          console.warn('Filtering out invalid segment:', segment);
+          console.warn('🔍 Filtering out invalid segment:', segment);
         }
         
         return isValid;
@@ -285,7 +417,7 @@ class WhisperWorker {
         confidence: Math.max(0, Math.min(1, segment.confidence))
       }));
     
-    console.log(`Processed ${validatedSegments.length} valid segments from ${segments.length} raw segments`);
+    console.log(`🔍 FINAL VALIDATED: ${validatedSegments.length} segments from ${segments.length} raw segments`);
     
     return validatedSegments;
   }
@@ -317,10 +449,76 @@ class WhisperWorker {
     }
     
     if (duplicatesFound > 0) {
+      console.log(`🔍 DEDUPLICATION: Merged ${duplicatesFound} duplicate segments`);
       this.sendMessage('progress', { stage: 'deduplication', message: `Merged ${duplicatesFound} duplicate segments` });
     }
     
     return deduplicated;
+  }
+
+  private deduplicateAndDetectLoops(segments: TranscriptionSegment[]): TranscriptionSegment[] {
+    if (segments.length === 0) return segments;
+
+    // First, do standard deduplication
+    let processed = this.deduplicateSegments(segments);
+
+    console.log(`🔍 LOOP DETECTION: Starting with ${processed.length} segments after deduplication`);
+
+    // Then, detect and remove looping patterns
+    const loopDetectionWindow = 3; // Reduced from 5 to be less aggressive
+    const loopsToRemove: number[] = [];
+
+    for (let i = 0; i < processed.length - loopDetectionWindow; i++) {
+      const currentSegment = processed[i];
+      const currentText = currentSegment.text.toLowerCase();
+      
+      // Check if this text appears multiple times in the next few segments
+      let repetitions = 0;
+      const repetitionIndices: number[] = [];
+      
+      for (let j = i + 1; j < Math.min(i + loopDetectionWindow, processed.length); j++) {
+        const candidateSegment = processed[j];
+        // Also check timestamp proximity - loops usually happen in close time ranges
+        const timeDiff = Math.abs(candidateSegment.start - currentSegment.end);
+        const isTimeClose = timeDiff < 5.0; // Within 5 seconds
+        
+        if (this.textsSimilar(currentText, candidateSegment.text.toLowerCase(), 0.9) && isTimeClose) {
+          repetitions++;
+          repetitionIndices.push(j);
+        }
+      }
+      
+      // Only mark for removal if we found at least 2 repetitions (3 total occurrences)
+      if (repetitions >= 2) {
+        console.log(`🔍 LOOP DETECTED at segment ${i}: "${currentText.substring(0, 50)}..." repeated ${repetitions} times at indices [${repetitionIndices.join(', ')}]`);
+        this.sendMessage('progress', { 
+          stage: 'loop-detection', 
+          message: `Detected potential loop: "${currentText.substring(0, 50)}..." repeated ${repetitions} times` 
+        });
+        
+        // Add indices to removal list
+        loopsToRemove.push(...repetitionIndices);
+      }
+    }
+
+    // Remove detected loops
+    if (loopsToRemove.length > 0) {
+      const uniqueIndices = [...new Set(loopsToRemove)].sort((a, b) => b - a);
+      console.log(`🔍 LOOP REMOVAL: Removing ${uniqueIndices.length} looping segments at indices: [${uniqueIndices.slice(0, 10).join(', ')}${uniqueIndices.length > 10 ? '...' : ''}]`);
+      
+      for (const index of uniqueIndices) {
+        processed.splice(index, 1);
+      }
+      
+      this.sendMessage('progress', { 
+        stage: 'loop-detection', 
+        message: `Removed ${uniqueIndices.length} looping segments` 
+      });
+    } else {
+      console.log(`🔍 LOOP DETECTION: No loops found`);
+    }
+
+    return processed;
   }
 
   private segmentsOverlap(seg1: TranscriptionSegment, seg2: TranscriptionSegment): boolean {
@@ -329,17 +527,70 @@ class WhisperWorker {
     return overlap > 0 && overlap / minDuration > 0.5;
   }
 
-  private textsSimilar(text1: string, text2: string): boolean {
+  private textsSimilar(text1: string, text2: string, threshold: number = 0.8): boolean {
     const clean1 = text1.toLowerCase().trim();
     const clean2 = text2.toLowerCase().trim();
     
+    // Exact match
     if (clean1 === clean2) return true;
-    if (clean1.includes(clean2) || clean2.includes(clean1)) return true;
     
-    const longer = clean1.length > clean2.length ? clean1 : clean2;
-    const shorter = clean1.length > clean2.length ? clean2 : clean1;
-    const commonChars = [...shorter].filter(char => longer.includes(char)).length;
-    return commonChars / shorter.length > 0.8;
+    // One contains the other (for very short segments)
+    if (clean1.length < 10 || clean2.length < 10) {
+      if (clean1.includes(clean2) || clean2.includes(clean1)) return true;
+    }
+    
+    // Use token-based Jaccard similarity instead of character-based
+    const tokens1 = this.tokenize(clean1);
+    const tokens2 = this.tokenize(clean2);
+    
+    if (tokens1.length === 0 || tokens2.length === 0) return false;
+    
+    // Calculate Jaccard similarity
+    const set1 = new Set(tokens1);
+    const set2 = new Set(tokens2);
+    
+    const intersection = new Set([...set1].filter(x => set2.has(x)));
+    const union = new Set([...set1, ...set2]);
+    
+    if (union.size === 0) return false;
+    
+    const jaccardSimilarity = intersection.size / union.size;
+    
+    // For very similar sizes, also check token order similarity
+    if (Math.abs(tokens1.length - tokens2.length) <= 2) {
+      const orderSimilarity = this.calculateOrderSimilarity(tokens1, tokens2);
+      // Weighted average: 70% Jaccard, 30% order
+      const combinedSimilarity = (jaccardSimilarity * 0.7) + (orderSimilarity * 0.3);
+      return combinedSimilarity > threshold;
+    }
+    
+    return jaccardSimilarity > threshold;
+  }
+
+  private tokenize(text: string): string[] {
+    // Simple tokenization: split on whitespace and punctuation
+    return text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')  // Replace punctuation with spaces
+      .split(/\s+/)               // Split on whitespace
+      .filter(token => token.length > 0);  // Remove empty tokens
+  }
+
+  private calculateOrderSimilarity(tokens1: string[], tokens2: string[]): number {
+    // Calculate how many tokens appear in the same relative order
+    const maxLen = Math.max(tokens1.length, tokens2.length);
+    if (maxLen === 0) return 0;
+    
+    let matches = 0;
+    const minLen = Math.min(tokens1.length, tokens2.length);
+    
+    for (let i = 0; i < minLen; i++) {
+      if (tokens1[i] === tokens2[i]) {
+        matches++;
+      }
+    }
+    
+    return matches / maxLen;
   }
 
   private mergeSegments(seg1: TranscriptionSegment, seg2: TranscriptionSegment): TranscriptionSegment {

@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { Worker } from 'worker_threads';
 import * as path from 'path';
+import * as fs from 'fs';
 
 export interface TranscriptionSegment {
   start: number;
@@ -22,6 +23,9 @@ export interface TranscriptionOptions {
   task?: 'transcribe' | 'translate';
   chunkLength?: number;
   strideLength?: number;
+  conditionOnPreviousText?: boolean;
+  maxContextLength?: number;
+  adaptiveChunking?: boolean;
   abortSignal?: AbortSignal;
 }
 
@@ -135,6 +139,22 @@ export class WhisperTranscriber extends EventEmitter {
   }
 
   /**
+   * Determine if file is large based on audio file size and duration
+   */
+  private isLargeFile(audioPath: string): boolean {
+    try {
+      const stats = fs.statSync(audioPath);
+      const fileSizeMB = stats.size / (1024 * 1024);
+      
+      // Lower threshold: > 10MB is considered large
+      // (Duration check will happen in worker where we have audio buffer)
+      return fileSizeMB > 10;
+    } catch {
+      return false; // Default to false if we can't read file
+    }
+  }
+
+  /**
    * Transcribe audio file using Whisper in worker thread
    */
   async transcribeAudio(
@@ -144,6 +164,30 @@ export class WhisperTranscriber extends EventEmitter {
     console.log(`🎤 Starting worker-based transcription: ${audioPath}`);
 
     const { abortSignal } = options;
+
+    // Auto-detect large file and adjust defaults if not explicitly set
+    const isLarge = this.isLargeFile(audioPath);
+    const effectiveOptions: TranscriptionOptions = {
+      ...options,
+      // Apply smart defaults for large files if not explicitly overridden
+      chunkLength: options.chunkLength ?? (isLarge ? 20 : 30),
+      strideLength: options.strideLength ?? (isLarge ? 2 : 5),
+      conditionOnPreviousText: options.conditionOnPreviousText ?? !isLarge,
+      maxContextLength: options.maxContextLength ?? 100,
+      adaptiveChunking: options.adaptiveChunking ?? true
+    };
+
+    // 🔍 DIAGNOSTIC LOGGING
+    console.log(`🔍 WHISPER TRANSCRIBER OPTIONS:`, JSON.stringify({
+      audioPath,
+      isLargeBySize: isLarge,
+      originalOptions: options,
+      effectiveOptions
+    }, null, 2));
+
+    if (isLarge) {
+      console.log(`📦 Large file detected (>10MB). Using optimized settings: chunk=${effectiveOptions.chunkLength}s, stride=${effectiveOptions.strideLength}s, conditioning=${effectiveOptions.conditionOnPreviousText}`);
+    }
 
     return new Promise((resolve, reject) => {
       // Check for cancellation at start
@@ -222,12 +266,14 @@ export class WhisperTranscriber extends EventEmitter {
         });
       }
 
-      // Send transcription request to worker
+      // Send transcription request to worker with effective options
+      console.log(`🔍 Sending to worker:`, JSON.stringify(effectiveOptions, null, 2));
+      
       this.worker.postMessage({
         type: 'transcribe',
         data: {
           audioPath,
-          options
+          options: effectiveOptions
         }
       });
     });
@@ -263,4 +309,4 @@ export class WhisperTranscriber extends EventEmitter {
   get isLoaded(): boolean {
     return this.isModelLoaded;
   }
-} 
+}

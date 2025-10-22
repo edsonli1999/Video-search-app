@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { VideoFile, SearchResult, TranscriptSegment } from '../shared/types';
 import './App.css';
 
@@ -20,6 +20,10 @@ declare global {
       onTranscriptionFailed: (callback: (data: { videoId: number; jobId: string; error: string }) => void) => void;
       onTranscriptionCancelled: (callback: (data: { videoId: number; jobId: string }) => void) => void;
       onTranscriptionProgress: (callback: (data: { videoId: number; stage: string; progress: number; message: string }) => void) => void;
+      removeTranscriptionCompletedListener?: (callback: (data: { videoId: number; jobId: string }) => void) => void;
+      removeTranscriptionFailedListener?: (callback: (data: { videoId: number; jobId: string; error: string }) => void) => void;
+      removeTranscriptionCancelledListener?: (callback: (data: { videoId: number; jobId: string }) => void) => void;
+      removeTranscriptionProgressListener?: (callback: (data: { videoId: number; stage: string; progress: number; message: string }) => void) => void;
     };
   }
 }
@@ -62,6 +66,14 @@ const App: React.FC = () => {
       message: string;
     }
   }>({});
+
+  // Use refs to access current values in callbacks
+  const selectedFolderRef = useRef<string | null>(selectedFolder);
+  
+  // Update ref when selectedFolder changes
+  useEffect(() => {
+    selectedFolderRef.current = selectedFolder;
+  }, [selectedFolder]);
 
   // Helper function to get stage display name
   const getStageDisplayName = (stage: string): string => {
@@ -122,8 +134,8 @@ const App: React.FC = () => {
       .trim();
   }, [transcriptSegments]);
 
-  // Load videos by status - updated to show ALL videos in folder for new session
-  const loadVideosByStatus = async () => {
+  // Load videos by status - use useCallback to create stable function reference
+  const loadVideosByStatus = useCallback(async () => {
     try {
       // Always load completed and failed videos globally
       const [completed, failed] = await Promise.all([
@@ -132,11 +144,12 @@ const App: React.FC = () => {
       ]);
       
       // For new session, show ALL videos from the selected folder
+      // Use the ref to get the current folder value
       let newSession: VideoFile[] = [];
-      if (selectedFolder) {
+      if (selectedFolderRef.current) {
         // Get ALL videos from the selected folder, regardless of status
-        newSession = await window.electronAPI.getVideosByFolder(selectedFolder);
-        console.log(`📂 Loaded ALL videos from folder: ${selectedFolder} (${newSession.length} total)`);
+        newSession = await window.electronAPI.getVideosByFolder(selectedFolderRef.current);
+        console.log(`📂 Loaded ALL videos from folder: ${selectedFolderRef.current} (${newSession.length} total)`);
       }
       
       setCompletedVideos(completed);
@@ -147,7 +160,7 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Error loading videos by status:', error);
     }
-  };
+  }, []); // Empty deps since we use ref for selectedFolder
 
   // Manual search function
   const performSearch = async () => {
@@ -174,58 +187,86 @@ const App: React.FC = () => {
     }
   };
 
+  // Create stable event handlers using useCallback
+  const handleTranscriptionCompleted = useCallback((data: { videoId: number; jobId: string }) => {
+    console.log(`🎉 Frontend: Transcription completed for video ${data.videoId}`);
+    setTranscriptionProgress(prev => {
+      const updated = { ...prev };
+      delete updated[data.videoId];
+      return updated;
+    });
+    loadVideosByStatus();
+  }, [loadVideosByStatus]);
+
+  const handleTranscriptionFailed = useCallback((data: { videoId: number; jobId: string; error: string }) => {
+    console.log(`❌ Frontend: Transcription failed for video ${data.videoId}:`, data.error);
+    setTranscriptionProgress(prev => {
+      const updated = { ...prev };
+      delete updated[data.videoId];
+      return updated;
+    });
+    loadVideosByStatus();
+  }, [loadVideosByStatus]);
+
+  const handleTranscriptionCancelled = useCallback((data: { videoId: number; jobId: string }) => {
+    console.log(`🛑 Frontend: Transcription cancelled for video ${data.videoId}`);
+    setTranscriptionProgress(prev => {
+      const updated = { ...prev };
+      delete updated[data.videoId];
+      return updated;
+    });
+    loadVideosByStatus();
+  }, [loadVideosByStatus]);
+
+  const handleTranscriptionProgress = useCallback((data: { videoId: number; stage: string; progress: number; message: string }) => {
+    console.log(`📊 Frontend: Progress update for video ${data.videoId}: ${data.stage} - ${data.progress}%`);
+    setTranscriptionProgress(prev => ({
+      ...prev,
+      [data.videoId]: {
+        stage: data.stage,
+        progress: data.progress,
+        message: data.message
+      }
+    }));
+  }, []);
+
   // Load existing videos on app start and set up event listeners
   useEffect(() => {
     loadVideosByStatus();
-    
-    // Listen for transcription events
-    window.electronAPI.onTranscriptionCompleted((data) => {
-      console.log(`🎉 Frontend: Transcription completed for video ${data.videoId}`);
-      setTranscriptionProgress(prev => {
-        const updated = { ...prev };
-        delete updated[data.videoId];
-        return updated;
-      });
-      loadVideosByStatus(); // Reload videos to update status
-    });
-    
-    window.electronAPI.onTranscriptionFailed((data) => {
-      console.log(`❌ Frontend: Transcription failed for video ${data.videoId}:`, data.error);
-      setTranscriptionProgress(prev => {
-        const updated = { ...prev };
-        delete updated[data.videoId];
-        return updated;
-      });
-      loadVideosByStatus();
-    });
+  }, [loadVideosByStatus]);
 
-    window.electronAPI.onTranscriptionCancelled((data) => {
-      console.log(`🛑 Frontend: Transcription cancelled for video ${data.videoId}`);
-      setTranscriptionProgress(prev => {
-        const updated = { ...prev };
-        delete updated[data.videoId];
-        return updated;
-      });
-      loadVideosByStatus();
-    });
+  // Set up and clean up event listeners
+  useEffect(() => {
+    // Register event listeners
+    window.electronAPI.onTranscriptionCompleted(handleTranscriptionCompleted);
+    window.electronAPI.onTranscriptionFailed(handleTranscriptionFailed);
+    window.electronAPI.onTranscriptionCancelled(handleTranscriptionCancelled);
+    window.electronAPI.onTranscriptionProgress(handleTranscriptionProgress);
 
-    window.electronAPI.onTranscriptionProgress((data) => {
-      console.log(`📊 Frontend: Progress update for video ${data.videoId}: ${data.stage} - ${data.progress}%`);
-      setTranscriptionProgress(prev => ({
-        ...prev,
-        [data.videoId]: {
-          stage: data.stage,
-          progress: data.progress,
-          message: data.message
-        }
-      }));
-    });
-  }, []);
+    // Clean up event listeners when they change or component unmounts
+    return () => {
+      // Note: If the Electron API doesn't provide removeListener methods,
+      // you may need to implement them in the preload script.
+      // For now, we'll just re-register with new handlers on change.
+      if (window.electronAPI.removeTranscriptionCompletedListener) {
+        window.electronAPI.removeTranscriptionCompletedListener(handleTranscriptionCompleted);
+      }
+      if (window.electronAPI.removeTranscriptionFailedListener) {
+        window.electronAPI.removeTranscriptionFailedListener(handleTranscriptionFailed);
+      }
+      if (window.electronAPI.removeTranscriptionCancelledListener) {
+        window.electronAPI.removeTranscriptionCancelledListener(handleTranscriptionCancelled);
+      }
+      if (window.electronAPI.removeTranscriptionProgressListener) {
+        window.electronAPI.removeTranscriptionProgressListener(handleTranscriptionProgress);
+      }
+    };
+  }, [handleTranscriptionCompleted, handleTranscriptionFailed, handleTranscriptionCancelled, handleTranscriptionProgress]);
 
   // Reload videos when selected folder changes
   useEffect(() => {
     loadVideosByStatus();
-  }, [selectedFolder]);
+  }, [selectedFolder, loadVideosByStatus]);
 
   const handleSelectFolder = async () => {
     try {
