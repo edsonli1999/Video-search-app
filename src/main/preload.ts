@@ -73,6 +73,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getVideosByStatusAndFolder: (status: string, folderPath: string): Promise<VideoFile[]> =>
     ipcRenderer.invoke('get-videos-by-status-and-folder', status, folderPath),
 
+  getDeletedVideos: (): Promise<VideoFile[]> =>
+    ipcRenderer.invoke('get-deleted-videos'),
+
   // Search operations
   searchVideos: (query: string): Promise<SearchResult[]> =>
     ipcRenderer.invoke(IPC_CHANNELS.SEARCH_VIDEOS, query),
@@ -107,6 +110,10 @@ declare global {
       getVideos: () => Promise<VideoFile[]>;
       transcribeVideo: (videoId: number) => Promise<{ success: boolean; message: string }>;
       cancelTranscription: (videoId: number) => Promise<{ success: boolean; message: string }>;
+      getVideosByStatus: (status: string) => Promise<VideoFile[]>;
+      getVideosByFolder: (folderPath: string) => Promise<VideoFile[]>;
+      getVideosByStatusAndFolder: (status: string, folderPath: string) => Promise<VideoFile[]>;
+      getDeletedVideos: () => Promise<VideoFile[]>;
       searchVideos: (query: string) => Promise<SearchResult[]>;
       getTranscript: (videoId: number) => Promise<TranscriptSegment[]>;
       onTranscriptionCompleted: (callback: (data: { videoId: number; jobId: string }) => void) => void;

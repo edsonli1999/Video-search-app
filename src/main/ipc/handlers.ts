@@ -227,4 +227,14 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       throw error;
     }
   });
+
+  // Handle getting deleted/archived videos
+  ipcMain.handle('get-deleted-videos', async () => {
+    try {
+      return db.getDeletedVideos();
+    } catch (error) {
+      console.error('Error getting deleted videos:', error);
+      throw error;
+    }
+  });
 }

@@ -12,6 +12,7 @@ declare global {
       getVideosByStatus: (status: VideoFile['transcriptionStatus']) => Promise<VideoFile[]>;
       getVideosByFolder: (folderPath: string) => Promise<VideoFile[]>;
       getVideosByStatusAndFolder: (status: VideoFile['transcriptionStatus'], folderPath: string) => Promise<VideoFile[]>;
+      getDeletedVideos: () => Promise<VideoFile[]>;
       transcribeVideo: (videoId: number) => Promise<{ success: boolean; message: string }>;
       cancelTranscription: (videoId: number) => Promise<{ success: boolean; message: string }>;
       searchVideos: (query: string) => Promise<SearchResult[]>;
@@ -28,7 +29,7 @@ declare global {
   }
 }
 
-type TabType = 'new-session' | 'completed' | 'failed';
+type TabType = 'new-session' | 'completed' | 'failed' | 'archived';
 type TranscriptTabType = 'segmented' | 'plain-text';
 
 interface FolderStatistics {
@@ -44,7 +45,9 @@ const App: React.FC = () => {
   const [newSessionVideos, setNewSessionVideos] = useState<VideoFile[]>([]);
   const [completedVideos, setCompletedVideos] = useState<VideoFile[]>([]);
   const [failedVideos, setFailedVideos] = useState<VideoFile[]>([]);
-  
+  const [archivedVideos, setArchivedVideos] = useState<VideoFile[]>([]);
+  const [isLoadingArchived, setIsLoadingArchived] = useState(false);
+
   const [selectedFolder, setSelectedFolder] = useState<string | null>(() => {
     return localStorage.getItem('selectedVideoFolder');
   });
@@ -57,6 +60,7 @@ const App: React.FC = () => {
   const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
   const [activeTranscriptTab, setActiveTranscriptTab] = useState<TranscriptTabType>('segmented');
   const [copySuccess, setCopySuccess] = useState(false);
+  const [hasLoadedArchived, setHasLoadedArchived] = useState(false);
 
   // Progress tracking state
   const [transcriptionProgress, setTranscriptionProgress] = useState<{
@@ -69,7 +73,7 @@ const App: React.FC = () => {
 
   // Use refs to access current values in callbacks
   const selectedFolderRef = useRef<string | null>(selectedFolder);
-  
+
   // Update ref when selectedFolder changes
   useEffect(() => {
     selectedFolderRef.current = selectedFolder;
@@ -87,6 +91,13 @@ const App: React.FC = () => {
       default:
         return stage.charAt(0).toUpperCase() + stage.slice(1);
     }
+  };
+
+  // Helper function to format date
+  const formatDate = (dateString?: string): string => {
+    if (!dateString) return 'Unknown';
+    const date = new Date(dateString);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
   };
 
   // Memoized folder statistics - only recalculates when newSessionVideos changes
@@ -142,7 +153,7 @@ const App: React.FC = () => {
         window.electronAPI.getVideosByStatus('completed'),
         window.electronAPI.getVideosByStatus('failed')
       ]);
-      
+
       // For new session, show ALL videos from the selected folder
       // Use the ref to get the current folder value
       let newSession: VideoFile[] = [];
@@ -151,16 +162,42 @@ const App: React.FC = () => {
         newSession = await window.electronAPI.getVideosByFolder(selectedFolderRef.current);
         console.log(`📂 Loaded ALL videos from folder: ${selectedFolderRef.current} (${newSession.length} total)`);
       }
-      
+
       setCompletedVideos(completed);
       setFailedVideos(failed);
       setNewSessionVideos(newSession);
-      
+
       console.log(`📊 Loaded videos - Folder: ${newSession.length}, Completed (global): ${completed.length}, Failed (global): ${failed.length}`);
     } catch (error) {
       console.error('Error loading videos by status:', error);
     }
   }, []); // Empty deps since we use ref for selectedFolder
+
+  // Load archived videos
+  const loadArchivedVideos = async () => {
+    if (isLoadingArchived) return;
+
+    try {
+      setIsLoadingArchived(true);
+      const archived = await window.electronAPI.getDeletedVideos();
+      setArchivedVideos(archived);
+      setHasLoadedArchived(true);
+      console.log(`📦 Loaded ${archived.length} archived videos`);
+    } catch (error) {
+      console.error('Error loading archived videos:', error);
+      setArchivedVideos([]);
+      setHasLoadedArchived(true);
+    } finally {
+      setIsLoadingArchived(false);
+    }
+  };
+
+  // Load archived videos when tab is activated for the first time
+  useEffect(() => {
+    if (activeTab === 'archived' && !hasLoadedArchived && !isLoadingArchived) {
+      loadArchivedVideos();
+    }
+  }, [activeTab, hasLoadedArchived, isLoadingArchived]);
 
   // Manual search function
   const performSearch = async () => {
@@ -196,6 +233,8 @@ const App: React.FC = () => {
       return updated;
     });
     loadVideosByStatus();
+    // Reset archived flag to force reload on next view
+    setHasLoadedArchived(false);
   }, [loadVideosByStatus]);
 
   const handleTranscriptionFailed = useCallback((data: { videoId: number; jobId: string; error: string }) => {
@@ -206,6 +245,8 @@ const App: React.FC = () => {
       return updated;
     });
     loadVideosByStatus();
+    // Reset archived flag to force reload on next view
+    setHasLoadedArchived(false);
   }, [loadVideosByStatus]);
 
   const handleTranscriptionCancelled = useCallback((data: { videoId: number; jobId: string }) => {
@@ -274,11 +315,11 @@ const App: React.FC = () => {
       if (folderPath) {
         setSelectedFolder(folderPath);
         localStorage.setItem('selectedVideoFolder', folderPath);
-        
+
         setIsScanning(true);
         await window.electronAPI.scanVideos(folderPath);
         setIsScanning(false);
-        
+
         // Reload videos after scanning - will now show ALL videos in the folder
         await loadVideosByStatus();
       }
@@ -299,9 +340,9 @@ const App: React.FC = () => {
 
     try {
       console.log(`${isRetranscribe ? '🔄 Re-transcribing' : '🎬 Transcribing'} video ${video.id}: ${video.fileName}`);
-      
+
       const result = await window.electronAPI.transcribeVideo(video.id);
-      
+
       if (result.success) {
         console.log(`📋 Frontend: ${isRetranscribe ? 'Re-transcription' : 'Transcription'} job queued for video ${video.id}`);
         // Update local state to reflect processing status
@@ -342,7 +383,7 @@ const App: React.FC = () => {
       setCurrentVideo(video);
       setActiveTranscriptTab('segmented'); // Reset to segmented view
       setCopySuccess(false);
-      
+
       const segments = await window.electronAPI.getTranscript(video.id);
       setTranscriptSegments(segments);
     } catch (error) {
@@ -385,27 +426,33 @@ const App: React.FC = () => {
   // Memoized status breakdown string
   const statusBreakdown = useMemo(() => {
     if (folderStatistics.total === 0) return 'No videos';
-    
+
     const parts = [];
     if (folderStatistics.pending > 0) parts.push(`${folderStatistics.pending} pending`);
     if (folderStatistics.processing > 0) parts.push(`${folderStatistics.processing} processing`);
     if (folderStatistics.completed > 0) parts.push(`${folderStatistics.completed} completed`);
     if (folderStatistics.failed > 0) parts.push(`${folderStatistics.failed} failed`);
-    
+
     return parts.join(', ');
   }, [folderStatistics]);
 
   // Render video card component
-  const renderVideoCard = (video: VideoFile) => (
-    <div key={video.id || video.filePath} className="video-card">
+  const renderVideoCard = (video: VideoFile, isArchived: boolean = false) => (
+    <div key={video.id || video.filePath} className={`video-card ${isArchived ? 'archived-card' : ''}`}>
       <div className="video-info">
         <h3 className="video-title">{video.fileName}</h3>
         <p className="video-size">{formatFileSize(video.fileSize)}</p>
+        {isArchived && (
+          <p className="archived-info">
+            <span className="archived-badge">📦 Archived</span>
+            <span className="archived-date">Last updated: {formatDate(video.updatedAt)}</span>
+          </p>
+        )}
         <p className="video-path">{video.filePath}</p>
       </div>
-      
+
       <div className="video-actions">
-        {video.transcriptionStatus === 'processing' && video.id && transcriptionProgress[video.id] ? (
+        {!isArchived && video.transcriptionStatus === 'processing' && video.id && transcriptionProgress[video.id] ? (
           <div className="progress-section">
             <div className="progress-info">
               <div className="progress-stage">{getStageDisplayName(transcriptionProgress[video.id].stage)}</div>
@@ -432,7 +479,7 @@ const App: React.FC = () => {
               {video.transcriptionStatus}
             </div>
 
-            {video.transcriptionStatus === 'pending' && (
+            {!isArchived && video.transcriptionStatus === 'pending' && (
               <button
                 onClick={() => handleTranscribeVideo(video)}
                 className="transcribe-btn"
@@ -441,7 +488,7 @@ const App: React.FC = () => {
               </button>
             )}
 
-            {video.transcriptionStatus === 'processing' && (
+            {!isArchived && video.transcriptionStatus === 'processing' && (
               <button
                 onClick={() => handleCancelTranscription(video)}
                 className="cancel-btn"
@@ -453,24 +500,26 @@ const App: React.FC = () => {
 
             {video.transcriptionStatus === 'completed' && (
               <div className="completed-actions">
-                <button 
+                <button
                   onClick={() => handleViewTranscript(video)}
                   className="view-btn"
                 >
                   View Transcript
                 </button>
-                <button 
-                  onClick={() => handleTranscribeVideo(video, true)}
-                  className="retranscribe-btn"
-                  title="Re-transcribe this video"
-                >
-                  🔄 Re-transcribe
-                </button>
+                {!isArchived && (
+                  <button
+                    onClick={() => handleTranscribeVideo(video, true)}
+                    className="retranscribe-btn"
+                    title="Re-transcribe this video"
+                  >
+                    🔄 Re-transcribe
+                  </button>
+                )}
               </div>
             )}
-            
-            {video.transcriptionStatus === 'failed' && (
-              <button 
+
+            {!isArchived && video.transcriptionStatus === 'failed' && (
+              <button
                 onClick={() => handleTranscribeVideo(video, true)}
                 className="retry-btn"
                 title="Retry transcription"
@@ -517,6 +566,12 @@ const App: React.FC = () => {
             >
               Failed ({failedVideos.length})
             </button>
+            <button
+              className={`tab-button ${activeTab === 'archived' ? 'active' : ''}`}
+              onClick={() => setActiveTab('archived')}
+            >
+              Archived ({archivedVideos.length})
+            </button>
           </div>
 
           {/* Tab Content */}
@@ -526,8 +581,8 @@ const App: React.FC = () => {
                 <div className="folder-selection-area">
                   <h2>Start a New Transcription Session</h2>
                   <div className="folder-controls">
-                    <button 
-                      onClick={handleSelectFolder} 
+                    <button
+                      onClick={handleSelectFolder}
                       disabled={isScanning}
                       className="select-folder-btn"
                     >
@@ -543,7 +598,7 @@ const App: React.FC = () => {
                       </button>
                     )}
                   </div>
-                  
+
                   {selectedFolder && folderStatistics.total > 0 && (
                     <div className="folder-info">
                       <p><strong>Current Folder:</strong> {selectedFolder}</p>
@@ -563,7 +618,7 @@ const App: React.FC = () => {
                   <div className="videos-section">
                     <h3>All Videos in {folderName}</h3>
                     <div className="videos-grid">
-                      {newSessionVideos.map(renderVideoCard)}
+                      {newSessionVideos.map(video => renderVideoCard(video))}
                     </div>
                   </div>
                 )}
@@ -588,7 +643,7 @@ const App: React.FC = () => {
                       onKeyPress={handleSearchKeyPress}
                       disabled={isSearching}
                     />
-                    <button 
+                    <button
                       onClick={performSearch}
                       disabled={isSearching || !searchQuery.trim()}
                       className="search-btn"
@@ -596,7 +651,7 @@ const App: React.FC = () => {
                       {isSearching ? 'Searching...' : 'Search'}
                     </button>
                     {searchQuery && (
-                      <button 
+                      <button
                         onClick={() => {
                           setSearchQuery('');
                           setSearchResults([]);
@@ -636,7 +691,7 @@ const App: React.FC = () => {
                   <div className="videos-section">
                     <h3>Completed Transcriptions</h3>
                     <div className="videos-grid">
-                      {completedVideos.map(renderVideoCard)}
+                      {completedVideos.map(video => renderVideoCard(video))}
                     </div>
                   </div>
                 ) : (
@@ -653,12 +708,34 @@ const App: React.FC = () => {
                   <div className="videos-section">
                     <h3>Failed Transcriptions</h3>
                     <div className="videos-grid">
-                      {failedVideos.map(renderVideoCard)}
+                      {failedVideos.map(video => renderVideoCard(video))}
                     </div>
                   </div>
                 ) : (
                   <div className="empty-state">
                     <p>No failed transcriptions. Great job!</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'archived' && (
+              <div className="archived-tab">
+                {isLoadingArchived ? (
+                  <div className="loading">Loading archived videos...</div>
+                ) : archivedVideos.length > 0 ? (
+                  <div className="videos-section">
+                    <h3>Archived Videos</h3>
+                    <p className="archived-description">
+                      These videos have been removed from their original location but their transcripts are preserved.
+                    </p>
+                    <div className="videos-grid">
+                      {archivedVideos.map(video => renderVideoCard(video, true))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <p>No archived videos. Videos appear here when they're deleted from the filesystem but have been previously transcribed.</p>
                   </div>
                 )}
               </div>
@@ -672,7 +749,7 @@ const App: React.FC = () => {
             <div className="transcript-modal" onClick={(e) => e.stopPropagation()}>
               <div className="transcript-header">
                 <h2>Transcript: {currentVideo.fileName}</h2>
-                <button 
+                <button
                   onClick={handleCloseTranscript}
                   className="close-btn"
                   aria-label="Close transcript"
@@ -680,7 +757,7 @@ const App: React.FC = () => {
                   ✕
                 </button>
               </div>
-              
+
               {/* Transcript Tabs */}
               <div className="transcript-tabs">
                 <button
@@ -696,7 +773,7 @@ const App: React.FC = () => {
                   Plain Text
                 </button>
               </div>
-              
+
               <div className="transcript-content">
                 {isLoadingTranscript ? (
                   <div className="loading">Loading transcript...</div>
@@ -719,11 +796,11 @@ const App: React.FC = () => {
                         ))}
                       </div>
                     )}
-                    
+
                     {activeTranscriptTab === 'plain-text' && (
                       <div className="plain-text-view">
                         <div className="plain-text-controls">
-                          <button 
+                          <button
                             onClick={handleCopyTranscript}
                             className="copy-btn"
                           >

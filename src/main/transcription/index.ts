@@ -178,17 +178,17 @@ export class TranscriptionOrchestrator extends EventEmitter {
         message: 'Starting transcription with Whisper...'
       });
 
-      // Prepare whisper options
+      // Prepare whisper options - pass through undefined values to let worker use its defaults
       const whisperOptions = {
         model: options.model,
         language: options.language,
         abortSignal: abortController?.signal,
-        // Forward new options
-        chunkLength: options.chunkLength,
-        strideLength: options.strideLength,
-        conditionOnPreviousText: options.conditionOnPreviousText,
-        maxContextLength: options.maxContextLength,
-        adaptiveChunking: options.adaptiveChunking
+        // Pass through options only if they were explicitly provided
+        ...(options.chunkLength !== undefined && { chunkLength: options.chunkLength }),
+        ...(options.strideLength !== undefined && { strideLength: options.strideLength }),
+        ...(options.conditionOnPreviousText !== undefined && { conditionOnPreviousText: options.conditionOnPreviousText }),
+        ...(options.maxContextLength !== undefined && { maxContextLength: options.maxContextLength }),
+        ...(options.adaptiveChunking !== undefined && { adaptiveChunking: options.adaptiveChunking })
       };
 
       // 🔍 DIAGNOSTIC LOGGING

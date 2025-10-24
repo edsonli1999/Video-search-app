@@ -880,3 +880,83 @@
   font-style: italic;
   margin-top: 1rem;
 }
+
+
+/* Archived Tab Styles */
+.archived-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.archived-description {
+  color: #7f8c8d;
+  font-size: 0.95rem;
+  margin-bottom: 1rem;
+  background-color: #fef9e7;
+  padding: 1rem;
+  border-radius: 6px;
+  border: 1px solid #f39c12;
+}
+
+/* Archived Video Card Styles */
+.archived-card {
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+}
+
+.archived-card:hover {
+  background-color: #e9ecef;
+}
+
+.archived-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.5rem 0;
+}
+
+.archived-badge {
+  display: inline-block;
+  background-color: #6c757d;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  width: fit-content;
+}
+
+.archived-date {
+  color: #6c757d;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+/* Adjust archived card video path for better visibility */
+.archived-card .video-path {
+  color: #6c757d;
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+/* Adjust archived card actions */
+.archived-card .video-actions {
+  opacity: 0.9;
+}
+
+/* Mobile responsive archived styles */
+@media (max-width: 768px) {
+  .archived-description {
+    font-size: 0.9rem;
+    padding: 0.75rem;
+  }
+  
+  .archived-info {
+    font-size: 0.8rem;
+  }
+  
+  .archived-badge {
+    font-size: 0.75rem;
+  }
+}

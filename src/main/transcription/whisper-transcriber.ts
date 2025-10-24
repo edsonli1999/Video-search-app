@@ -165,14 +165,20 @@ export class WhisperTranscriber extends EventEmitter {
 
     const { abortSignal } = options;
 
-    // Auto-detect large file and adjust defaults if not explicitly set
+    // Auto-detect large file
     const isLarge = this.isLargeFile(audioPath);
+
+    // Build effective options - only set explicit values if provided by caller
+    // Otherwise, let the worker use its own defaults (30/5/true for large files)
     const effectiveOptions: TranscriptionOptions = {
-      ...options,
-      // Apply smart defaults for large files if not explicitly overridden
-      chunkLength: options.chunkLength ?? (isLarge ? 20 : 30),
-      strideLength: options.strideLength ?? (isLarge ? 2 : 5),
-      conditionOnPreviousText: options.conditionOnPreviousText ?? !isLarge,
+      model: options.model,
+      language: options.language,
+      task: options.task,
+      // Only pass through values that were explicitly provided
+      ...(options.chunkLength !== undefined && { chunkLength: options.chunkLength }),
+      ...(options.strideLength !== undefined && { strideLength: options.strideLength }),
+      ...(options.conditionOnPreviousText !== undefined && { conditionOnPreviousText: options.conditionOnPreviousText }),
+      // These have defaults we want to preserve
       maxContextLength: options.maxContextLength ?? 100,
       adaptiveChunking: options.adaptiveChunking ?? true
     };
@@ -182,11 +188,23 @@ export class WhisperTranscriber extends EventEmitter {
       audioPath,
       isLargeBySize: isLarge,
       originalOptions: options,
-      effectiveOptions
+      effectiveOptions,
+      workerDefaults: 'Will use worker defaults for unspecified: chunk=30s, stride=5s, conditionOnPreviousText=true'
     }, null, 2));
 
     if (isLarge) {
-      console.log(`📦 Large file detected (>10MB). Using optimized settings: chunk=${effectiveOptions.chunkLength}s, stride=${effectiveOptions.strideLength}s, conditioning=${effectiveOptions.conditionOnPreviousText}`);
+      // Log what values we're actually sending (or letting default)
+      const chunkMsg = effectiveOptions.chunkLength !== undefined 
+        ? `${effectiveOptions.chunkLength}s (explicit)` 
+        : '30s (worker default)';
+      const strideMsg = effectiveOptions.strideLength !== undefined 
+        ? `${effectiveOptions.strideLength}s (explicit)` 
+        : '5s (worker default)';
+      const conditionMsg = effectiveOptions.conditionOnPreviousText !== undefined 
+        ? `${effectiveOptions.conditionOnPreviousText} (explicit)` 
+        : 'true (worker default)';
+      
+      console.log(`📦 Large file detected (>10MB). Settings: chunk=${chunkMsg}, stride=${strideMsg}, conditioning=${conditionMsg}`);
     }
 
     return new Promise((resolve, reject) => {

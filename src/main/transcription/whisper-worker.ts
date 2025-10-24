@@ -29,6 +29,16 @@ interface TranscriptionSegment {
   confidence: number;
 }
 
+interface LoopDetectionResult {
+  segments: TranscriptionSegment[];
+  removedSegments: Array<{
+    index: number;
+    start: number;
+    end: number;
+    text: string;
+  }>;
+}
+
 class WhisperWorker {
   private model: any = null;
   private transformersModule: any = null;
@@ -144,10 +154,12 @@ class WhisperWorker {
       const {
         language = 'en',
         task = 'transcribe',
-        // Adaptive defaults for large files
-        chunkLength = isLargeFile ? 20 : 30,  // Smaller chunks for large files
-        strideLength = isLargeFile ? 2 : 5,    // Less overlap for large files
-        conditionOnPreviousText = !isLargeFile, // Disable for large files by default
+        // Adaptive defaults for large files - now with bigger chunks and more overlap
+        chunkLength = isLargeFile ? 30 : 30,  // Same chunk size for both now
+        strideLength = isLargeFile ? 5 : 5,    // Same overlap for both now
+        conditionOnPreviousText = options.conditionOnPreviousText !== undefined 
+          ? options.conditionOnPreviousText 
+          : true, // Enable conditioning for all files by default
         maxContextLength = 100,  // Limit context to prevent loops
         adaptiveChunking = true
       } = options;
@@ -188,7 +200,6 @@ class WhisperWorker {
         stride_length_s: strideLength,
         return_timestamps: true,
         return_segments: true,
-        // Disable conditioning on previous text for large files to prevent loops
         condition_on_previous_text: conditionOnPreviousText,
       };
 
@@ -210,6 +221,23 @@ class WhisperWorker {
       
       console.log(`🔍 RAW WHISPER OUTPUT: ${rawChunkCount} chunks/segments received`);
       
+      this.sendMessage('progress', { 
+        stage: 'transcribing', 
+        progress: 90, 
+        message: `Processing ${rawChunkCount} segments...` 
+      });
+
+      // Process segments with enhanced validation and loop detection
+      const processResult = this.processSegments(result, { detectLoops: isLargeFile });
+      const segments = processResult.segments;
+      const removedSegments = processResult.removedSegments;
+      
+      // 🔍 DIAGNOSTIC LOGGING - Post-processing results
+      console.log(`🔍 POST-PROCESSING: ${segments.length} segments after deduplication/loop detection (from ${rawChunkCount} raw)`);
+      if (removedSegments.length > 0) {
+        console.log(`🔍 LOOP DETECTION: Removed ${removedSegments.length} segments`);
+      }
+      
       // Save diagnostic data to temp file
       const tempDir = path.join(process.cwd(), 'temp');
       if (!fs.existsSync(tempDir)) {
@@ -230,23 +258,25 @@ class WhisperWorker {
             chunkCount: result.chunks?.length,
             segmentCount: result.segments?.length
           }
+        },
+        loopDetection: {
+          enabled: isLargeFile,
+          removedCount: removedSegments.length,
+          removedSample: removedSegments.slice(0, 5).map(seg => ({
+            text: seg.text.substring(0, 100) + (seg.text.length > 100 ? '...' : ''),
+            startTime: seg.start,
+            endTime: seg.end,
+            originalIndex: seg.index
+          }))
+        },
+        finalOutput: {
+          segmentCount: segments.length,
+          reductionPercentage: ((rawChunkCount - segments.length) / rawChunkCount * 100).toFixed(1) + '%'
         }
       };
       
       fs.writeFileSync(diagnosticFile, JSON.stringify(diagnosticData, null, 2));
       console.log(`🔍 Diagnostic data saved to: ${diagnosticFile}`);
-      
-      this.sendMessage('progress', { 
-        stage: 'transcribing', 
-        progress: 90, 
-        message: `Processing ${rawChunkCount} segments (diagnostic: ${diagnosticFile})...` 
-      });
-
-      // Process segments with enhanced validation and loop detection
-      const segments = this.processSegments(result, { detectLoops: isLargeFile });
-      
-      // 🔍 DIAGNOSTIC LOGGING - Post-processing results
-      console.log(`🔍 POST-PROCESSING: ${segments.length} segments after deduplication/loop detection (from ${rawChunkCount} raw)`);
       
       this.sendMessage('progress', { stage: 'transcribing', progress: 100, message: 'Transcription completed' });
       
@@ -312,7 +342,7 @@ class WhisperWorker {
     return samples;
   }
 
-  private processSegments(result: any, options: { detectLoops?: boolean } = {}): TranscriptionSegment[] {
+  private processSegments(result: any, options: { detectLoops?: boolean } = {}): { segments: TranscriptionSegment[], removedSegments: any[] } {
     const segments: TranscriptionSegment[] = [];
     let lastEndTime = 0; // Track the last end time for fixing missing timestamps
 
@@ -388,9 +418,16 @@ class WhisperWorker {
     console.log(`🔍 BEFORE DEDUPLICATION: ${segments.length} segments`);
 
     // Apply enhanced deduplication and loop detection
-    const deduplicatedSegments = options.detectLoops 
-      ? this.deduplicateAndDetectLoops(segments)
-      : this.deduplicateSegments(segments);
+    let removedSegments: any[] = [];
+    let deduplicatedSegments: TranscriptionSegment[];
+    
+    if (options.detectLoops) {
+      const loopResult = this.deduplicateAndDetectLoops(segments);
+      deduplicatedSegments = loopResult.segments;
+      removedSegments = loopResult.removedSegments;
+    } else {
+      deduplicatedSegments = this.deduplicateSegments(segments);
+    }
     
     console.log(`🔍 AFTER DEDUPLICATION: ${deduplicatedSegments.length} segments`);
 
@@ -419,7 +456,10 @@ class WhisperWorker {
     
     console.log(`🔍 FINAL VALIDATED: ${validatedSegments.length} segments from ${segments.length} raw segments`);
     
-    return validatedSegments;
+    return {
+      segments: validatedSegments,
+      removedSegments
+    };
   }
 
   private deduplicateSegments(segments: TranscriptionSegment[]): TranscriptionSegment[] {
@@ -456,8 +496,8 @@ class WhisperWorker {
     return deduplicated;
   }
 
-  private deduplicateAndDetectLoops(segments: TranscriptionSegment[]): TranscriptionSegment[] {
-    if (segments.length === 0) return segments;
+  private deduplicateAndDetectLoops(segments: TranscriptionSegment[]): LoopDetectionResult {
+    if (segments.length === 0) return { segments, removedSegments: [] };
 
     // First, do standard deduplication
     let processed = this.deduplicateSegments(segments);
@@ -467,6 +507,7 @@ class WhisperWorker {
     // Then, detect and remove looping patterns
     const loopDetectionWindow = 3; // Reduced from 5 to be less aggressive
     const loopsToRemove: number[] = [];
+    const removedSegments: any[] = [];
 
     for (let i = 0; i < processed.length - loopDetectionWindow; i++) {
       const currentSegment = processed[i];
@@ -501,11 +542,24 @@ class WhisperWorker {
       }
     }
 
-    // Remove detected loops
+    // Remove detected loops and capture removed segments
     if (loopsToRemove.length > 0) {
       const uniqueIndices = [...new Set(loopsToRemove)].sort((a, b) => b - a);
       console.log(`🔍 LOOP REMOVAL: Removing ${uniqueIndices.length} looping segments at indices: [${uniqueIndices.slice(0, 10).join(', ')}${uniqueIndices.length > 10 ? '...' : ''}]`);
       
+      // Capture removed segments before deletion
+      for (const index of uniqueIndices) {
+        if (processed[index]) {
+          removedSegments.push({
+            index,
+            start: processed[index].start,
+            end: processed[index].end,
+            text: processed[index].text
+          });
+        }
+      }
+      
+      // Remove segments in reverse order to maintain indices
       for (const index of uniqueIndices) {
         processed.splice(index, 1);
       }
@@ -518,7 +572,10 @@ class WhisperWorker {
       console.log(`🔍 LOOP DETECTION: No loops found`);
     }
 
-    return processed;
+    return {
+      segments: processed,
+      removedSegments
+    };
   }
 
   private segmentsOverlap(seg1: TranscriptionSegment, seg2: TranscriptionSegment): boolean {

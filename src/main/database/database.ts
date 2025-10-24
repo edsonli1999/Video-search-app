@@ -128,14 +128,24 @@ export class VideoDatabase {
     const schemaPath = path.join(__dirname, 'schema.sql');
     const schema = fs.readFileSync(schemaPath, 'utf-8');
     this.db.exec(schema);
+    
+    // Add the deleted column if it doesn't exist (for existing databases)
+    try {
+      this.db.exec(`
+        ALTER TABLE videos ADD COLUMN deleted INTEGER DEFAULT 0;
+      `);
+      console.log('🔧 DB: Added deleted column to videos table');
+    } catch (error) {
+      // Column probably already exists, which is fine
+    }
   }
 
   // Video operations
   insertVideo(video: Omit<VideoFile, 'id'>): number {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
-        INSERT INTO videos (file_path, file_name, file_size, duration, transcription_status)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO videos (file_path, file_name, file_size, duration, transcription_status, deleted)
+        VALUES (?, ?, ?, ?, ?, 0)
       `);
 
       const result = stmt.run(
@@ -178,14 +188,14 @@ export class VideoDatabase {
   getAllVideos(): VideoFile[] {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
-        SELECT * FROM videos ORDER BY created_at DESC
+        SELECT * FROM videos WHERE deleted = 0 ORDER BY created_at DESC
       `);
 
       const rows = stmt.all() as any[];
       return rows.map(row => this.mapRowToVideo(row));
     } else {
       // Memory-based implementation
-      return [...this.memoryVideos].reverse();
+      return [...this.memoryVideos].filter(v => !(v as any).deleted).reverse();
     }
   }
 
@@ -207,6 +217,45 @@ export class VideoDatabase {
     }
   }
 
+  // Soft delete - preserves transcript history
+  softDeleteVideo(videoId: number): void {
+    if (this.isAvailable) {
+      const stmt = this.db.prepare(`
+        UPDATE videos SET deleted = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `);
+      stmt.run(videoId);
+      console.log(`🗑️ DB: Soft deleted video ${videoId}`);
+    } else {
+      // Memory-based implementation
+      const video = this.memoryVideos.find(v => v.id === videoId);
+      if (video) {
+        (video as any).deleted = true;
+        video.updatedAt = new Date().toISOString();
+      }
+    }
+  }
+
+  // Restore a soft-deleted video
+  restoreVideo(videoId: number): void {
+    if (this.isAvailable) {
+      const stmt = this.db.prepare(`
+        UPDATE videos SET deleted = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `);
+      stmt.run(videoId);
+      console.log(`♻️ DB: Restored video ${videoId}`);
+    } else {
+      // Memory-based implementation
+      const video = this.memoryVideos.find(v => v.id === videoId);
+      if (video) {
+        (video as any).deleted = false;
+        video.updatedAt = new Date().toISOString();
+      }
+    }
+  }
+
+  // Hard delete - removes video and all associated data
   deleteVideo(videoId: number): void {
     if (this.isAvailable) {
       const stmt = this.db.prepare('DELETE FROM videos WHERE id = ?');
@@ -218,6 +267,22 @@ export class VideoDatabase {
         this.memoryVideos.splice(index, 1);
         this.memoryTranscripts.delete(videoId);
       }
+    }
+  }
+
+  // Get deleted videos - NEW METHOD
+  getDeletedVideos(): VideoFile[] {
+    if (this.isAvailable) {
+      const stmt = this.db.prepare(`
+        SELECT * FROM videos WHERE deleted = 1 ORDER BY updated_at DESC
+      `);
+
+      const rows = stmt.all() as any[];
+      console.log(`📦 DB: Found ${rows.length} archived videos`);
+      return rows.map(row => this.mapRowToVideo(row));
+    } else {
+      // Memory-based implementation
+      return this.memoryVideos.filter(v => (v as any).deleted === true);
     }
   }
 
@@ -305,7 +370,7 @@ export class VideoDatabase {
     }
   }
 
-  // Search operations
+  // Search operations - exclude deleted videos
   searchTranscripts(query: string, limit: number = 50): SearchResult[] {
     console.log('🔍 DB: searchTranscripts called with query:', query, 'limit:', limit);
     console.log('🔍 DB: Database available:', this.isAvailable);
@@ -329,7 +394,7 @@ export class VideoDatabase {
         FROM transcripts t
         JOIN transcript_segments ts ON t.rowid = ts.id
         JOIN videos v ON ts.video_id = v.id
-        WHERE transcripts MATCH ?
+        WHERE transcripts MATCH ? AND v.deleted = 0
         ORDER BY t.rank
         LIMIT ?
       `);
@@ -381,6 +446,8 @@ export class VideoDatabase {
       const queryLower = query.toLowerCase();
 
       for (const video of this.memoryVideos) {
+        if ((video as any).deleted) continue; // Skip deleted videos
+        
         console.log('🔍 DB: Checking video:', video.fileName, 'ID:', video.id);
         const segments = this.memoryTranscripts.get(video.id!) || [];
         console.log('🔍 DB: Video segments count:', segments.length);
@@ -443,7 +510,7 @@ export class VideoDatabase {
   }
 
   // Helper methods
-  private mapRowToVideo(row: any): VideoFile {
+  private mapRowToVideo(row: any): VideoFile & { deleted?: boolean } {
     return {
       id: row.id,
       filePath: row.file_path,
@@ -452,7 +519,8 @@ export class VideoDatabase {
       duration: row.duration,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      transcriptionStatus: row.transcription_status
+      transcriptionStatus: row.transcription_status,
+      deleted: row.deleted === 1
     };
   }
 
@@ -467,12 +535,12 @@ export class VideoDatabase {
     };
   }
 
-  // Get videos by transcription status
+  // Get videos by transcription status - exclude deleted
   getVideosByStatus(status: VideoFile['transcriptionStatus']): VideoFile[] {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
       SELECT * FROM videos 
-      WHERE transcription_status = ? 
+      WHERE transcription_status = ? AND deleted = 0
       ORDER BY updated_at DESC
     `);
 
@@ -480,33 +548,36 @@ export class VideoDatabase {
       return rows.map(row => this.mapRowToVideo(row));
     } else {
       // Memory-based implementation
-      return this.memoryVideos.filter(v => v.transcriptionStatus === status);
+      return this.memoryVideos.filter(v => v.transcriptionStatus === status && !(v as any).deleted);
     }
   }
 
-  // Get videos by folder path
-  getVideosByFolder(folderPath: string): VideoFile[] {
+  // Get videos by folder path - with option to include deleted
+  getVideosByFolder(folderPath: string, includeDeleted: boolean = false): VideoFile[] {
     if (this.isAvailable) {
-      const stmt = this.db.prepare(`
-      SELECT * FROM videos 
-      WHERE file_path LIKE ? 
-      ORDER BY file_name ASC
-    `);
+      const sql = includeDeleted 
+        ? `SELECT * FROM videos WHERE file_path LIKE ? ORDER BY file_name ASC`
+        : `SELECT * FROM videos WHERE file_path LIKE ? AND deleted = 0 ORDER BY file_name ASC`;
+      
+      const stmt = this.db.prepare(sql);
 
       const rows = stmt.all(`${folderPath}%`) as any[];
       return rows.map(row => this.mapRowToVideo(row));
     } else {
       // Memory-based implementation
-      return this.memoryVideos.filter(v => v.filePath.startsWith(folderPath));
+      return this.memoryVideos.filter(v => {
+        const matchesPath = v.filePath.startsWith(folderPath);
+        return includeDeleted ? matchesPath : (matchesPath && !(v as any).deleted);
+      });
     }
   }
 
-  // Get videos by status and folder
+  // Get videos by status and folder - exclude deleted
   getVideosByStatusAndFolder(status: VideoFile['transcriptionStatus'], folderPath: string): VideoFile[] {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
       SELECT * FROM videos 
-      WHERE transcription_status = ? AND file_path LIKE ?
+      WHERE transcription_status = ? AND file_path LIKE ? AND deleted = 0
       ORDER BY updated_at DESC
     `);
 
@@ -515,24 +586,26 @@ export class VideoDatabase {
     } else {
       // Memory-based implementation
       return this.memoryVideos.filter(v =>
-        v.transcriptionStatus === status && v.filePath.startsWith(folderPath)
+        v.transcriptionStatus === status && 
+        v.filePath.startsWith(folderPath) && 
+        !(v as any).deleted
       );
     }
   }
 
-  // Get count of videos by status
+  // Get count of videos by status - exclude deleted
   getVideoCountByStatus(status: VideoFile['transcriptionStatus']): number {
     if (this.isAvailable) {
       const stmt = this.db.prepare(`
       SELECT COUNT(*) as count FROM videos 
-      WHERE transcription_status = ?
+      WHERE transcription_status = ? AND deleted = 0
     `);
 
       const result = stmt.get(status) as any;
       return result.count;
     } else {
       // Memory-based implementation
-      return this.memoryVideos.filter(v => v.transcriptionStatus === status).length;
+      return this.memoryVideos.filter(v => v.transcriptionStatus === status && !(v as any).deleted).length;
     }
   }
 

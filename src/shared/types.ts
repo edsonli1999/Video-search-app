@@ -6,6 +6,7 @@ export interface VideoFile {
   duration?: number;
   createdAt?: string;
   updatedAt?: string;
+  deleted?: boolean;
   transcriptionStatus: 'pending' | 'processing' | 'completed' | 'failed';
 }
 
