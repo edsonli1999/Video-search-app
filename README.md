@@ -214,11 +214,46 @@ CREATE VIRTUAL TABLE transcripts USING fts5(
 3. **Performance Optimizations**:
    - Parallel job processing and smarter prioritisation
    - Incremental indexing for large collections
-   
+
 4. **UI/UX Improvements**:
    - Dark mode support
    - Keyboard shortcuts
    - Better progress indicators
+
+## Transcription Quality Notes
+
+- **Latest diagnostic run (large >500MB sample)**  
+  - Worker defaults: 30s chunk length, 5s stride, conditioning enabled (see `src/main/transcription/whisper-transcriber.ts`).  
+  - Outcome: 417 raw segments -> 116 loop removals -> 301 retained segments. Transcript is longer than previous runs but still contains repeated passages.
+
+- **Immediate experiments to queue**
+  1. **Inference knobs**: trial runs removing or increasing `max_new_tokens`, and adjust `log_prob_threshold` / `no_speech_threshold` to see if confidence filtering reduces loops.
+  2. **Model capacity**: re-run the same clip with higher checkpoints (`Xenova/whisper-small`, `...-medium`, `...-large` if available locally) to compare duplication rates versus runtime.
+  3. **Chunk overlap**: test a tighter stride (e.g., 4s) while keeping 30s chunks to measure whether additional context lowers repetition.
+  4. **Diagnostics discipline**: after each change, capture the raw/loop-removed/final segment counts (and any runtime notes) so the loop-removal trend stays measurable between experiments.
+
+- **How to stage a manual override test**
+  - Open `src/main/transcription/index.ts` and locate `TranscriptionOrchestrator.processTranscriptionJob`.
+  - Right before the existing `const whisperOptions = { ... }` block, add a temporary object for the knobs you want to try:
+    ```ts
+    // TEMP: experiment with alternative defaults
+    const testOptions = {
+      chunkLength: 20,
+      strideLength: 4,
+      conditionOnPreviousText: true,
+      maxContextLength: 150,
+      model: 'Xenova/whisper-small'
+    };
+    ```
+  - When calling `whisperTranscriber.transcribeAudio(...)`, pass the merge of the experiment values and the normal options so any explicit UI overrides still win:
+    ```ts
+    const transcriptionResult = await this.whisperTranscriber.transcribeAudio(
+      audioResult.outputPath!,
+      { ...testOptions, ...whisperOptions }
+    );
+    ```
+  - To probe the `max_new_tokens` behaviour, adjust the conditional in `src/main/transcription/whisper-worker.ts` (search `// Add max_new_tokens`) and set it to `undefined`, a higher ceiling, or your experimental value.
+  - Run the large sample video, record the raw/loop-removed/final counts printed by the worker logs, then revert the temporary object once the experiment is logged.
 
 ## Git Repository Cleanup
 
