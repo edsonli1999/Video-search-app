@@ -178,6 +178,15 @@ export class TranscriptionOrchestrator extends EventEmitter {
         message: 'Starting transcription with Whisper...'
       });
 
+      // TEMP: experiment with alternative defaults
+      const testOptions = {
+        chunkLength: 20,
+        strideLength: 4,
+        conditionOnPreviousText: true,
+        maxContextLength: 150,
+        model: 'Xenova/whisper-small'
+      };
+
       // Prepare whisper options - pass through undefined values to let worker use its defaults
       const whisperOptions = {
         model: options.model,
@@ -218,7 +227,7 @@ export class TranscriptionOrchestrator extends EventEmitter {
 
       const transcriptionResult = await this.whisperTranscriber.transcribeAudio(
         audioResult.outputPath!,
-        whisperOptions
+        { ...testOptions, ...whisperOptions }
       );
 
       // Remove the listener after transcription

@@ -204,8 +204,12 @@ class WhisperWorker {
       };
 
       // Add max_new_tokens to prevent runaway generation
+      // TEMP: experiment with max_new_tokens behavior
+      // Options: undefined (no limit), higher ceiling, or experimental value
       if (isLargeFile) {
-        transcriptionOptions.max_new_tokens = maxContextLength;
+        // transcriptionOptions.max_new_tokens = maxContextLength; // Original
+        // transcriptionOptions.max_new_tokens = undefined; // No limit
+        transcriptionOptions.max_new_tokens = 200; // Experimental higher value
       }
 
       console.log('🔍 TRANSCRIPTION OPTIONS SENT TO MODEL:', JSON.stringify(transcriptionOptions, null, 2));

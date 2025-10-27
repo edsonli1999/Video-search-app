@@ -226,6 +226,10 @@ CREATE VIRTUAL TABLE transcripts USING fts5(
   - Worker defaults: 30s chunk length, 5s stride, conditioning enabled (see `src/main/transcription/whisper-transcriber.ts`).  
   - Outcome: 417 raw segments -> 116 loop removals -> 301 retained segments. Transcript is longer than previous runs but still contains repeated passages.
 
+- **Override experiment (20s/4s + higher token cap)**  
+  - Override values: 20s chunk length, 4s stride, conditioning enabled, `maxContextLength = 150`, `model = 'Xenova/whisper-small'`, `max_new_tokens = 200`.  
+  - Outcome: 400 raw segments -> 146 loop removals -> 254 retained segments (36.5% reduction). Duplication shifted to repeated `[Growling]` segments and overall transcript length decreased, so this knob mix regressed quality.
+
 - **Immediate experiments to queue**
   1. **Inference knobs**: trial runs removing or increasing `max_new_tokens`, and adjust `log_prob_threshold` / `no_speech_threshold` to see if confidence filtering reduces loops.
   2. **Model capacity**: re-run the same clip with higher checkpoints (`Xenova/whisper-small`, `...-medium`, `...-large` if available locally) to compare duplication rates versus runtime.
@@ -254,6 +258,34 @@ CREATE VIRTUAL TABLE transcripts USING fts5(
     ```
   - To probe the `max_new_tokens` behaviour, adjust the conditional in `src/main/transcription/whisper-worker.ts` (search `// Add max_new_tokens`) and set it to `undefined`, a higher ceiling, or your experimental value.
   - Run the large sample video, record the raw/loop-removed/final counts printed by the worker logs, then revert the temporary object once the experiment is logged.
+
+- **Rollback plan (Step back one knob at a time)**
+  1. **Undo the `max_new_tokens` bump first**  
+     - Open `src/main/transcription/whisper-worker.ts` and find the block that currently reads:
+       ```ts
+       // TEMP: experiment with max_new_tokens behavior
+       if (isLargeFile) {
+         transcriptionOptions.max_new_tokens = 200; // Experimental higher value
+       }
+       ```
+     - Replace it with the original behavior so large files reuse their context length as the cap:
+       ```ts
+       if (isLargeFile) {
+         transcriptionOptions.max_new_tokens = maxContextLength;
+       }
+       ```
+       (Alternatively, remove the assignment entirely to let the worker defaults kick in.)
+     - Keep the 20s/4s override inside `TranscriptionOrchestrator.processTranscriptionJob` untouched during this test so you isolate the effect of the token cap.  
+     - Re-run the large sample clip and log the diagnostic summary (`raw -> removed -> retained`) before making any other tweaks.
+  2. **Only after capturing those results** should you revisit chunk length, stride, or model changes.
+
+- **Readable diagnostic timestamps**
+  - Diagnostic files (`temp/whisper-diagnostic-*.json`) currently use a raw `Date.now()` value, which is hard to correlate with wall-clock experiments.  
+  - Update `src/main/transcription/whisper-worker.ts` so the file name includes a readable stamp:  
+    1. Create a helper (e.g., `formatDiagnosticTimestamp`) that converts a JS `Date` into `HHmmDDMMYYYY` (example: `160027102025` for 16:00 on 27 Oct 2025).  
+    2. When generating the file name, build both the millisecond epoch (for metadata) and the formatted string, then use the human-readable label in ``whisper-diagnostic-${label}.json``.  
+    3. Continue writing the numeric epoch inside the JSON (`timestamp` field) so automated tooling can still sort by time.  
+  - After changing the formatter, re-run a test to confirm the file name uses the new pattern and that the JSON still contains the diagnostic data.
 
 ## Git Repository Cleanup
 
