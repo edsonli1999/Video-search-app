@@ -287,6 +287,85 @@ CREATE VIRTUAL TABLE transcripts USING fts5(
     3. Continue writing the numeric epoch inside the JSON (`timestamp` field) so automated tooling can still sort by time.  
   - After changing the formatter, re-run a test to confirm the file name uses the new pattern and that the JSON still contains the diagnostic data.
 
+## Backend Feature: Persist Transcription Diagnostics Per Run
+
+Persist the metrics you already log for every Whisper execution so they can be analyzed later. The goal is to write a concise record into SQLite whenever a transcription finishes and make it queryable by backend code.
+
+- **Schema changes (`src/main/database/schema.sql`)**
+  - Append a new table definition; keep the existing foreign key conventions:
+    ```sql
+    CREATE TABLE IF NOT EXISTS transcription_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        video_id INTEGER NOT NULL,
+        run_timestamp TEXT NOT NULL,
+        model TEXT,
+        chunk_length INTEGER,
+        stride_length INTEGER,
+        condition_on_previous_text INTEGER,
+        max_context_length INTEGER,
+        adaptive_chunking INTEGER,
+        max_new_tokens INTEGER,
+        raw_segments INTEGER,
+        removed_segments INTEGER,
+        final_segments INTEGER,
+        reduction_pct REAL,
+        diagnostic_file TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_transcription_runs_video_time
+      ON transcription_runs(video_id, run_timestamp DESC);
+    ```
+  - Call the same `CREATE TABLE IF NOT EXISTS` SQL from the database bootstrap so existing installs migrate automatically (no separate migration runner is required).
+
+- **Shared types (`src/shared/types.ts`)**
+  - Add a `TranscriptionRunRecord` interface containing the columns above (with camelCase property names) plus optional `durationSeconds?: number` if you want to store it later.
+
+- **Database API (`src/main/database/database.ts`)**
+  - Extend the `VideoDatabase` class with two new methods:
+    ```ts
+    recordTranscriptionRun(run: TranscriptionRunRecord): void;
+    getTranscriptionRuns(videoId: number, limit?: number): TranscriptionRunRecord[];
+    ```
+  - Implement inserts with prepared statements when SQLite is available, including boolean columns converted to 0/1. Mirror the methods in the in-memory fallback so diagnostics are still available if SQLite is disabled.
+  - Load precompiled statements during class construction to avoid recompiling per call. For example, create `this.insertTranscriptionRunStmt = this.db.prepare(...);` guarded by the `isAvailable` flag.
+
+- **Worker payload (`src/main/transcription/whisper-worker.ts`)**
+  - Accept the `videoId` in the worker request payload (update the `TranscriptionRequest` interface and ensure `whisper-transcriber.ts` forwards it).
+  - After computing `rawChunkCount`, `removedSegments.length`, and `segments.length`, assemble a `diagnostics` object that includes:
+    ```ts
+    {
+      videoId,
+      runTimestamp: new Date(diagnosticTimestamp).toISOString(),
+      model: transcriptionOptions.model,
+      chunkLength: transcriptionOptions.chunk_length ?? chunkLength,
+      strideLength: transcriptionOptions.stride_length ?? strideLength,
+      conditionOnPreviousText,
+      maxContextLength,
+      adaptiveChunking,
+      maxNewTokens: transcriptionOptions.max_new_tokens ?? null,
+      rawSegments: rawChunkCount,
+      removedSegments: removedSegments.length,
+      finalSegments: segments.length,
+      reductionPct: rawChunkCount > 0 ? (rawChunkCount - segments.length) / rawChunkCount : 0,
+      diagnosticFile
+    }
+    ```
+  - Include this diagnostics object in the worker’s `result` message so the main thread can persist it without opening a database connection inside the worker.
+
+- **Transcriber bridge (`src/main/transcription/whisper-transcriber.ts`)**
+  - Update the `TranscriptionResult` interface to carry an optional `diagnostics?: TranscriptionRunRecord`.
+  - Ensure the `transcribe` call passes `videoId` through to the worker and forwards the diagnostics data from the worker back to the orchestrator.
+
+- **Orchestrator hook (`src/main/transcription/index.ts`)**
+  - After segments are validated (right before or after `insertTranscriptSegments`), call `this.database.recordTranscriptionRun` with the diagnostics returned by the worker. Guard against cases where diagnostics are missing (e.g., failure paths) and still write a record when no segments were produced.
+  - If `TranscriptionResult.success` is false, consider recording a partial run with zeroed `finalSegments` so you can reason about failures later.
+
+- **Memory cleanup**
+  - Append the diagnostic file path (`diagnosticFile`) to the existing cleanup routine if you want to prune old JSONs after persistence. This is optional but keeps `temp/` tidy.
+
+Implementation checklist: update the schema, extend shared types, wire the database helper, forward the diagnostics payload from worker → transcriber → orchestrator, and invoke the insert when a run completes. Once done, you can fetch recent runs with `getTranscriptionRuns(videoId, limit)` for dashboards or CLI reporting.
+
 ## Git Repository Cleanup
 
 If you have too many uncommitted changes:

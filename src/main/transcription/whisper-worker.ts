@@ -74,6 +74,17 @@ class WhisperWorker {
     }
   }
 
+  private formatDiagnosticTimestamp(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+
+    return `${year}${month}${day}${hours}${minutes}${seconds}`;
+  }
+
   async loadModel(modelName: string = 'Xenova/whisper-base'): Promise<void> {
     try {
       // Wait for initialization to complete before proceeding
@@ -116,8 +127,10 @@ class WhisperWorker {
   }
 
   async transcribeAudio(request: TranscriptionRequest): Promise<void> {
-    const diagnosticTimestamp = Date.now();
-    
+    const diagnosticDate = new Date();
+    const diagnosticTimestamp = diagnosticDate.getTime();
+    const diagnosticLabel = this.formatDiagnosticTimestamp(diagnosticDate);
+
     try {
       const { audioPath, options } = request;
 
@@ -204,12 +217,8 @@ class WhisperWorker {
       };
 
       // Add max_new_tokens to prevent runaway generation
-      // TEMP: experiment with max_new_tokens behavior
-      // Options: undefined (no limit), higher ceiling, or experimental value
       if (isLargeFile) {
-        // transcriptionOptions.max_new_tokens = maxContextLength; // Original
-        // transcriptionOptions.max_new_tokens = undefined; // No limit
-        transcriptionOptions.max_new_tokens = 200; // Experimental higher value
+        transcriptionOptions.max_new_tokens = maxContextLength;
       }
 
       console.log('🔍 TRANSCRIPTION OPTIONS SENT TO MODEL:', JSON.stringify(transcriptionOptions, null, 2));
@@ -247,8 +256,8 @@ class WhisperWorker {
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
       }
-      
-      const diagnosticFile = path.join(tempDir, `whisper-diagnostic-${diagnosticTimestamp}.json`);
+
+      const diagnosticFile = path.join(tempDir, `whisper-diagnostic-${diagnosticLabel}.json`);
       const diagnosticData = {
         ...diagnosticInfo,
         transcriptionOptions,
