@@ -222,149 +222,39 @@ CREATE VIRTUAL TABLE transcripts USING fts5(
 
 ## Transcription Quality Notes
 
-- **Latest diagnostic run (large >500MB sample)**  
-  - Worker defaults: 30s chunk length, 5s stride, conditioning enabled (see `src/main/transcription/whisper-transcriber.ts`).  
-  - Outcome: 417 raw segments -> 116 loop removals -> 301 retained segments. Transcript is longer than previous runs but still contains repeated passages.
+### Current issues:
+- Transcripts from longer videos don't return accurate transcripts, whilst short ones (videos <100mb) are relatively accurate.
+- `temp/whisper-diagnostic-20251112193848.json` (10 MB/352 s) is the “good” run: 67 raw chunks, 0 removals, coherent historical narrative. 
+- The “bad” long files (temp/whisper-diagnostic-1761190549995.json, …1761541369876.json, …20251110191309.json) all show 400+ raw chunks, loop pruning wiping out ~30‑37 %, and the surviving text devolves into generic short sentences near the 1400‑2200 s marks. So the model isn’t crashing; it is repeatedly re‑emitting low-confidence fragments as the clip gets longer.
+- Every clip that Whisper labels “large” gets `max_new_tokens = maxContextLength` in `src/main/transcription/whisper-worker.ts` (lines 167-217). That cap is 100 (or 150/200 when you manually override), whereas Whisper’s own decoder expects ~448 tokens for a 30 s chunk. We’re stopping generation after ~20‑30 tokens worth of speech and relying on the next chunk (with `condition_on_previous_text` still on) to finish the thought, which amplifies duplication as the chain grows to several hundred chunks.
+- The worker always loads `@xenova/transformers` with `{ quantized: true }` (src/main/transcription/whisper-worker.ts (lines 62-93)). That means every knob you test is still an int8 checkpoint. Feeding hundreds of chunks back into `condition_on_previous_text` with an `int8` model is a known way to accumulate hallucinations; the 6‑minute sample (67 chunks) stays fine simply because the chain is short.
+- There’s at least one different failure signature in `temp/whisper-diagnostic-20251110192342.json`: an 11‑minute, 21 MB file turned into only four chunks and the last chunk is 680 s of [silence]. That usually means the extracted WAV is basically zeroed after the intro (either we picked the wrong audio stream or mono down-mixing cancelled the dialogue). That points to the audio extraction path, not Whisper knobs.
 
-- **Override experiment (20s/4s + higher token cap)**  
-  - Override values: 20s chunk length, 4s stride, conditioning enabled, `maxContextLength = 150`, `model = 'Xenova/whisper-small'`, `max_new_tokens = 200`.  
-  - Outcome: 400 raw segments -> 146 loop removals -> 254 retained segments (36.5% reduction). Duplication shifted to repeated `[Growling]` segments and overall transcript length decreased, so this knob mix regressed quality.
+### Experiments to narrow down the cause:
+1. Lift the decoder ceiling for long clips:
+- Temporarily remove or bump the assignment in src/main/transcription/whisper-worker.ts (lines 208-217) so that max_new_tokens is undefined or ≥448 when chunk_length_s ≥20. Capture before/after diagnostics; if the loop-removal rate drops, the cap was starving the decoder.
 
-- **Immediate experiments to queue**
-  1. **Inference knobs**: trial runs removing or increasing `max_new_tokens`, and adjust `log_prob_threshold` / `no_speech_threshold` to see if confidence filtering reduces loops.
-  2. **Model capacity**: re-run the same clip with higher checkpoints (`Xenova/whisper-small`, `...-medium`, `...-large` if available locally) to compare duplication rates versus runtime.
-  3. **Chunk overlap**: test a tighter stride (e.g., 4s) while keeping 30s chunks to measure whether additional context lowers repetition.
-  4. **Diagnostics discipline**: after each change, capture the raw/loop-removed/final segment counts (and any runtime notes) so the loop-removal trend stays measurable between experiments.
+2. Turn off quantization for a control run: 
+- In `loadModel` (src/main/transcription/whisper-worker.ts (lines 62-93)), set quantized: false and run the 25‑minute clip once. If the transcript is suddenly accurate, we know the int8 models are the real bottleneck and you either need to ship the full-precision checkpoints or only quantize for short clips.
 
-- **How to stage a manual override test**
-  - Open `src/main/transcription/index.ts` and locate `TranscriptionOrchestrator.processTranscriptionJob`.
-  - Right before the existing `const whisperOptions = { ... }` block, add a temporary object for the knobs you want to try:
-    ```ts
-    // TEMP: experiment with alternative defaults
-    const testOptions = {
-      chunkLength: 20,
-      strideLength: 4,
-      conditionOnPreviousText: true,
-      maxContextLength: 150,
-      model: 'Xenova/whisper-small'
-    };
-    ```
-  - When calling `whisperTranscriber.transcribeAudio(...)`, pass the merge of the experiment values and the normal options so any explicit UI overrides still win:
-    ```ts
-    const transcriptionResult = await this.whisperTranscriber.transcribeAudio(
-      audioResult.outputPath!,
-      { ...testOptions, ...whisperOptions }
-    );
-    ```
-  - To probe the `max_new_tokens` behaviour, adjust the conditional in `src/main/transcription/whisper-worker.ts` (search `// Add max_new_tokens`) and set it to `undefined`, a higher ceiling, or your experimental value.
-  - Run the large sample video, record the raw/loop-removed/final counts printed by the worker logs, then revert the temporary object once the experiment is logged.
+3. Split giant clips into smaller jobs: 
+- Use FFmpeg to cut the WAV into ~5‑minute slices (ffmpeg -i bigfile.wav -f segment -segment_time 300 …), transcribe each slice with condition_on_previous_text=false, then offset timestamps before storing. If each slice matches the expected text, the degradation is purely from very long conditioning chains and we can automate that slicing path for >15‑minute files.
 
-- **Rollback plan (Step back one knob at a time)**
-  1. **Undo the `max_new_tokens` bump first**  
-     - Open `src/main/transcription/whisper-worker.ts` and find the block that currently reads:
-       ```ts
-       // TEMP: experiment with max_new_tokens behavior
-       if (isLargeFile) {
-         transcriptionOptions.max_new_tokens = 200; // Experimental higher value
-       }
-       ```
-     - Replace it with the original behavior so large files reuse their context length as the cap:
-       ```ts
-       if (isLargeFile) {
-         transcriptionOptions.max_new_tokens = maxContextLength;
-       }
-       ```
-       (Alternatively, remove the assignment entirely to let the worker defaults kick in.)
-     - Keep the 20s/4s override inside `TranscriptionOrchestrator.processTranscriptionJob` untouched during this test so you isolate the effect of the token cap.  
-     - Re-run the large sample clip and log the diagnostic summary (`raw -> removed -> retained`) before making any other tweaks.
-  2. **Only after capturing those results** should you revisit chunk length, stride, or model changes.
+4. Instrument the diagnostics with model signals: 
+- Record `avg_logprob`, `no_speech_prob`, and `compression_ratio` from `result.chunks` inside processSegments (src/main/transcription/whisper-worker.ts (lines 339-444)). Seeing those values plotted over time will tell you whether the model loses confidence gradually (pointing to conditioning drift) or whether certain minutes of audio are simply too quiet.
 
-- **Readable diagnostic timestamps**
-  - Diagnostic files (`temp/whisper-diagnostic-*.json`) currently use a raw `Date.now()` value, which is hard to correlate with wall-clock experiments.  
-  - Update `src/main/transcription/whisper-worker.ts` so the file name includes a readable stamp:  
-    1. Create a helper (e.g., `formatDiagnosticTimestamp`) that converts a JS `Date` into `HHmmDDMMYYYY` (example: `160027102025` for 16:00 on 27 Oct 2025).  
-    2. When generating the file name, build both the millisecond epoch (for metadata) and the formatted string, then use the human-readable label in ``whisper-diagnostic-${label}.json``.  
-    3. Continue writing the numeric epoch inside the JSON (`timestamp` field) so automated tooling can still sort by time.  
-  - After changing the formatter, re-run a test to confirm the file name uses the new pattern and that the JSON still contains the diagnostic data.
+5. Verify the extracted audio stream: 
+- Run `ffprobe` "temp/audio/57.wav" and confirm channel layout/levels. For multi-track movies, add .audioCodec('pcm_s16le').outputOptions(['-map 0:a:0']) and test both mono and stereo extractions. The “4 chunks with 680 s of silence” log strongly suggests that the current downmix sometimes picks the wrong track or cancels the dialogue channel; fixing the extractor would resolve those runs without touching Whisper.
 
-## Backend Feature: Persist Transcription Diagnostics Per Run
+6. Sanity-check against a reference implementation: 
+- Run the same long clip through whisper.cpp/faster-whisper (even a short excerpt) and compare transcripts. If the reference also hallucinates, the source audio is genuinely hard; if it succeeds, the issue is isolated to the Xenova worker.
 
-Persist the metrics you already log for every Whisper execution so they can be analyzed later. The goal is to write a concise record into SQLite whenever a transcription finishes and make it queryable by backend code.
+These checks should give an indication as the underlying cause:
+(a) decoder limits
+(b) quantized conditioning drift
+(c) the audio that is being fed to the worker
 
-- **Schema changes (`src/main/database/schema.sql`)**
-  - Append a new table definition; keep the existing foreign key conventions:
-    ```sql
-    CREATE TABLE IF NOT EXISTS transcription_runs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        video_id INTEGER NOT NULL,
-        run_timestamp TEXT NOT NULL,
-        model TEXT,
-        chunk_length INTEGER,
-        stride_length INTEGER,
-        condition_on_previous_text INTEGER,
-        max_context_length INTEGER,
-        adaptive_chunking INTEGER,
-        max_new_tokens INTEGER,
-        raw_segments INTEGER,
-        removed_segments INTEGER,
-        final_segments INTEGER,
-        reduction_pct REAL,
-        diagnostic_file TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_transcription_runs_video_time
-      ON transcription_runs(video_id, run_timestamp DESC);
-    ```
-  - Call the same `CREATE TABLE IF NOT EXISTS` SQL from the database bootstrap so existing installs migrate automatically (no separate migration runner is required).
-
-- **Shared types (`src/shared/types.ts`)**
-  - Add a `TranscriptionRunRecord` interface containing the columns above (with camelCase property names) plus optional `durationSeconds?: number` if you want to store it later.
-
-- **Database API (`src/main/database/database.ts`)**
-  - Extend the `VideoDatabase` class with two new methods:
-    ```ts
-    recordTranscriptionRun(run: TranscriptionRunRecord): void;
-    getTranscriptionRuns(videoId: number, limit?: number): TranscriptionRunRecord[];
-    ```
-  - Implement inserts with prepared statements when SQLite is available, including boolean columns converted to 0/1. Mirror the methods in the in-memory fallback so diagnostics are still available if SQLite is disabled.
-  - Load precompiled statements during class construction to avoid recompiling per call. For example, create `this.insertTranscriptionRunStmt = this.db.prepare(...);` guarded by the `isAvailable` flag.
-
-- **Worker payload (`src/main/transcription/whisper-worker.ts`)**
-  - Accept the `videoId` in the worker request payload (update the `TranscriptionRequest` interface and ensure `whisper-transcriber.ts` forwards it).
-  - After computing `rawChunkCount`, `removedSegments.length`, and `segments.length`, assemble a `diagnostics` object that includes:
-    ```ts
-    {
-      videoId,
-      runTimestamp: new Date(diagnosticTimestamp).toISOString(),
-      model: transcriptionOptions.model,
-      chunkLength: transcriptionOptions.chunk_length ?? chunkLength,
-      strideLength: transcriptionOptions.stride_length ?? strideLength,
-      conditionOnPreviousText,
-      maxContextLength,
-      adaptiveChunking,
-      maxNewTokens: transcriptionOptions.max_new_tokens ?? null,
-      rawSegments: rawChunkCount,
-      removedSegments: removedSegments.length,
-      finalSegments: segments.length,
-      reductionPct: rawChunkCount > 0 ? (rawChunkCount - segments.length) / rawChunkCount : 0,
-      diagnosticFile
-    }
-    ```
-  - Include this diagnostics object in the worker’s `result` message so the main thread can persist it without opening a database connection inside the worker.
-
-- **Transcriber bridge (`src/main/transcription/whisper-transcriber.ts`)**
-  - Update the `TranscriptionResult` interface to carry an optional `diagnostics?: TranscriptionRunRecord`.
-  - Ensure the `transcribe` call passes `videoId` through to the worker and forwards the diagnostics data from the worker back to the orchestrator.
-
-- **Orchestrator hook (`src/main/transcription/index.ts`)**
-  - After segments are validated (right before or after `insertTranscriptSegments`), call `this.database.recordTranscriptionRun` with the diagnostics returned by the worker. Guard against cases where diagnostics are missing (e.g., failure paths) and still write a record when no segments were produced.
-  - If `TranscriptionResult.success` is false, consider recording a partial run with zeroed `finalSegments` so you can reason about failures later.
-
-- **Memory cleanup**
-  - Append the diagnostic file path (`diagnosticFile`) to the existing cleanup routine if you want to prune old JSONs after persistence. This is optional but keeps `temp/` tidy.
-
-Implementation checklist: update the schema, extend shared types, wire the database helper, forward the diagnostics payload from worker → transcriber → orchestrator, and invoke the insert when a run completes. Once done, you can fetch recent runs with `getTranscriptionRuns(videoId, limit)` for dashboards or CLI reporting.
+From there, we can then decide whether to change the defaults in `whisper-worker.ts`, switch models, or patch the extractor.
 
 ## Git Repository Cleanup
 
